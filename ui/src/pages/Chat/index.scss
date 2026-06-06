@@ -17,23 +17,28 @@
  * under the License.
  */
 
-.hcai-chat-page {
-  display: grid;
-  grid-template-columns: 272px minmax(0, 1fr);
-  height: 100vh;
-  min-height: 100vh;
-  margin-top: -64px;
-  overflow: hidden;
+.hcai-chat-shell {
   color: #18263a;
 }
 
+.hcai-chat-page {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  height: calc(100vh - 64px);
+  min-height: calc(100vh - 64px);
+  overflow: hidden;
+}
+
 .hcai-chat-sidebar {
-  position: relative;
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  z-index: 1042;
   display: flex;
   flex-direction: column;
   width: 240px;
   height: calc(100vh - 2rem);
-  margin: 1rem 0 1rem 1rem;
+  margin: 0;
   padding: 0 14px 20px;
   overflow-y: auto;
   background: var(--an-glass-surface);
@@ -287,10 +292,11 @@
 
 .hcai-chat-main {
   position: relative;
+  grid-column: 2;
   display: flex;
   flex-direction: column;
   min-width: 0;
-  height: 100vh;
+  height: calc(100vh - 64px);
   min-height: 0;
   overflow: hidden;
 }
@@ -299,14 +305,25 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 72px;
-  padding: 80px 28px 0;
 }
 
 .hcai-mobile-conversation-menu {
   position: relative;
   display: none;
   flex: none;
+}
+
+.hcai-mobile-image-mode-switch {
+  display: none;
+}
+
+.hcai-chat-page-image .hcai-chat-topbar {
+  display: none;
+}
+
+.hcai-chat-page-image .hcai-chat-main {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .hcai-mobile-conversation-toggle {
@@ -1197,17 +1214,21 @@
   right: -8px;
   bottom: calc(100% + 12px);
   display: grid;
+  align-content: start;
   gap: 3px;
   width: min(300px, calc(100vw - 56px));
-  max-height: 360px;
+  max-height: min(360px, calc(100vh - 180px));
   padding: 6px;
-  overflow: visible;
+  overflow-x: visible;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--an-glass-border);
   border-radius: 16px;
   background: var(--an-glass-surface);
   box-shadow: var(--an-glass-shadow), var(--an-glass-inner-shadow);
   backdrop-filter: blur(var(--an-glass-blur)) saturate(1.45);
   -webkit-backdrop-filter: blur(var(--an-glass-blur)) saturate(1.45);
+  scrollbar-width: thin;
 }
 
 .hcai-model-option {
@@ -1708,7 +1729,7 @@
   border: 1px solid rgba(55, 155, 110, 0.22);
 }
 
-[data-bs-theme='dark'] .hcai-chat-page {
+[data-bs-theme='dark'] .hcai-chat-shell {
   color: var(--bs-body-color);
 
   .hcai-chat-sidebar,
@@ -2366,11 +2387,21 @@
 
   .hcai-chat-topbar {
     gap: 12px;
-    padding: 16px 18px 0;
   }
 
   .hcai-chat-main {
+    grid-column: 1;
     height: calc(100vh - 64px);
+  }
+
+  .hcai-chat-page-image,
+  .hcai-chat-page-image .hcai-chat-main {
+    height: calc(100vh - 64px);
+    min-height: calc(100vh - 64px);
+  }
+
+  .hcai-chat-page-image .hcai-chat-topbar {
+    display: none;
   }
 
   .hcai-mobile-conversation-menu {
@@ -2414,6 +2445,12 @@
 
   .hcai-subscription-detail {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media screen and (max-width: 620px) {
+  .hcai-chat-page-image .hcai-mobile-image-mode-switch {
+    display: none;
   }
 }
 

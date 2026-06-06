@@ -170,6 +170,13 @@ type AIImageModel struct {
 	DisplayName     string    `xorm:"not null default '' VARCHAR(255) display_name"`
 	Description     string    `xorm:"not null TEXT description"`
 	DefaultSize     string    `xorm:"not null default '1024x1024' VARCHAR(50) default_size"`
+	APIMode         string    `xorm:"not null default 'images' VARCHAR(50) api_mode"`
+	SupportsEdits   bool      `xorm:"not null default true BOOL supports_edits"`
+	SupportsRefs    bool      `xorm:"not null default true BOOL supports_references"`
+	SupportsStream  bool      `xorm:"not null default false BOOL supports_stream"`
+	DefaultQuality  string    `xorm:"not null default 'auto' VARCHAR(50) default_quality"`
+	DefaultFormat   string    `xorm:"not null default 'png' VARCHAR(50) default_format"`
+	ExtraConfig     string    `xorm:"not null TEXT extra_config"`
 	Enabled         bool      `xorm:"not null default true BOOL enabled"`
 	SortOrder       int       `xorm:"not null default 0 INT(11) sort_order"`
 	CreatedAt       time.Time `xorm:"created not null default CURRENT_TIMESTAMP TIMESTAMP created_at"`
@@ -201,6 +208,15 @@ type AIImageGeneration struct {
 	Size            string    `xorm:"not null default '' VARCHAR(50) size"`
 	Style           string    `xorm:"not null default '' VARCHAR(100) style"`
 	Quality         string    `xorm:"not null default '' VARCHAR(100) quality"`
+	OutputFormat    string    `xorm:"not null default '' VARCHAR(50) output_format"`
+	Compression     int       `xorm:"not null default 0 INT(11) compression"`
+	Moderation      string    `xorm:"not null default '' VARCHAR(50) moderation"`
+	Background      string    `xorm:"not null default '' VARCHAR(50) background"`
+	ReferenceImages string    `xorm:"not null TEXT reference_images"`
+	MaskImage       string    `xorm:"not null TEXT mask_image"`
+	APIMode         string    `xorm:"not null default '' VARCHAR(50) api_mode"`
+	ResponseID      string    `xorm:"not null default '' VARCHAR(255) response_id"`
+	ResponseOutput  string    `xorm:"not null TEXT response_output"`
 	Count           int       `xorm:"not null default 1 INT(11) count"`
 	ImageURLs       string    `xorm:"not null TEXT image_urls"`
 	Status          string    `xorm:"not null default 'completed' VARCHAR(50) status"`
@@ -211,6 +227,20 @@ type AIImageGeneration struct {
 }
 
 func (AIImageGeneration) TableName() string { return "ai_image_generations" }
+
+type AIImageAgentConversation struct {
+	ID             int       `xorm:"not null pk autoincr INT(11) id"`
+	ConversationID string    `xorm:"not null unique(conversation_user) VARCHAR(100) conversation_id"`
+	UserID         string    `xorm:"not null unique(conversation_user) index VARCHAR(100) user_id"`
+	Title          string    `xorm:"not null default '' VARCHAR(255) title"`
+	Payload        string    `xorm:"not null MEDIUMTEXT payload"`
+	CreatedAt      time.Time `xorm:"created not null default CURRENT_TIMESTAMP TIMESTAMP created_at"`
+	UpdatedAt      time.Time `xorm:"updated not null default CURRENT_TIMESTAMP TIMESTAMP updated_at"`
+}
+
+func (AIImageAgentConversation) TableName() string {
+	return "ai_image_agent_conversations"
+}
 
 type AIVideoProvider struct {
 	ID        int       `xorm:"not null pk autoincr INT(11) id"`

@@ -8,7 +8,9 @@ DOCKER_CMD=docker
 GO_ENV=CGO_ENABLED=0 GO111MODULE=on
 Revision=$(shell git rev-parse --short HEAD 2>/dev/null || echo "")
 GO_FLAGS=-ldflags="-X github.com/apache/answer/cmd.Version=$(VERSION) -X 'github.com/apache/answer/cmd.Revision=$(Revision)' -X 'github.com/apache/answer/cmd.Time=`date +%s`' -extldflags -static"
-GO=$(GO_ENV) "$(shell which go)"
+RAW_GO=$(shell which go)
+GO=$(GO_ENV) "$(RAW_GO)"
+GO_BIN=$(shell "$(RAW_GO)" env GOPATH)/bin
 
 GOLANGCI_VERSION ?= v2.6.2
 TOOLS_BIN := $(shell mkdir -p build/tools && realpath build/tools)
@@ -36,13 +38,13 @@ generate:
 	@$(GO) install github.com/swaggo/swag/cmd/swag@v1.16.3
 	@$(GO) install github.com/google/wire/cmd/wire@v0.5.0
 	@$(GO) install go.uber.org/mock/mockgen@v0.6.0
-	@$(GO) generate ./...
+	@PATH="$(GO_BIN):$(PATH)" $(GO) generate ./...
 	@$(GO) mod tidy
 
 check:
-	@mockgen -version
-	@swag -v
-	@wire flags
+	@PATH="$(GO_BIN):$(PATH)" mockgen -version
+	@PATH="$(GO_BIN):$(PATH)" swag -v
+	@PATH="$(GO_BIN):$(PATH)" wire flags
 
 test:
 	@$(GO) test ./internal/repo/repo_test

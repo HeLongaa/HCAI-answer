@@ -26,6 +26,8 @@ import { pathFactory } from '@/router/pathFactory';
 import { Icon } from '@/components';
 import { useHotQuestions } from '@/services';
 
+import './index.scss';
+
 const HotQuestions: FC = () => {
   const { t } = useTranslation('translation', { keyPrefix: 'question' });
   const { data: questionRes } = useHotQuestions();
@@ -33,22 +35,25 @@ const HotQuestions: FC = () => {
     return null;
   }
   return (
-    <Card>
-      <Card.Header className="text-nowrap text-capitalize">
+    <Card className="hot-questions-card">
+      <Card.Header className="hot-questions-header text-nowrap text-capitalize">
         {t('hot_questions')}
       </Card.Header>
-      <ListGroup variant="flush">
+      <ListGroup className="hot-questions-list" variant="flush">
         {questionRes?.list?.map((li) => {
           return (
             <ListGroupItem
+              className="hot-questions-item"
               key={li.id}
               as={Link}
               to={pathFactory.questionLanding(li.id, li.url_title)}
               action>
-              <div className="link-dark text-truncate-3">{li.title}</div>
+              <div className="hot-questions-title link-dark text-truncate-2">
+                {li.title}
+              </div>
               {li.answer_count > 0 ? (
                 <div
-                  className={`d-flex align-items-center small mt-1 ${
+                  className={`hot-questions-meta d-flex align-items-center ${
                     li.accepted_answer_id > 0
                       ? 'link-success'
                       : 'link-secondary'

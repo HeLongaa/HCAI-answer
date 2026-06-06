@@ -17,11 +17,6 @@
  * under the License.
  */
 
-.question-view-dropdown-menu {
-  min-width: 132px;
-  transform-origin: top right;
-}
-
 .question-list-refresh {
   display: inline-flex;
   align-items: center;
@@ -35,6 +30,32 @@
 
 .question-list-refreshing {
   animation: question-list-refresh-spin 0.8s linear infinite;
+}
+
+.question-list-create-post {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 31px;
+  padding: 0 0.9rem;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%);
+  box-shadow:
+    0 10px 22px rgba(37, 99, 235, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  font-weight: 750;
+  white-space: nowrap;
+
+  &:hover,
+  &:focus {
+    color: #fff;
+    background: linear-gradient(135deg, #1d4ed8 0%, #0284c7 100%);
+    box-shadow:
+      0 12px 26px rgba(37, 99, 235, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  }
 }
 
 @keyframes question-list-refresh-spin {
@@ -252,6 +273,11 @@
 }
 
 @media screen and (max-width: 767.9px) {
+  .question-list-create-post {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+
   .question-list-row {
     padding: 0.62rem 0.68rem !important;
   }

@@ -26,6 +26,24 @@ const (
 	featuredPostTagDescription = "精选话题"
 )
 
+var publicTaskStatuses = []string{
+	entity.TaskStatusOpen,
+	entity.TaskStatusInProgress,
+	entity.TaskStatusSubmitted,
+	entity.TaskStatusCompleted,
+	entity.TaskStatusFailed,
+	entity.TaskStatusClosed,
+}
+
+func isPublicTaskStatus(status string) bool {
+	for _, item := range publicTaskStatuses {
+		if status == item {
+			return true
+		}
+	}
+	return false
+}
+
 type TaskSquareService struct {
 	data         *data.Data
 	uniqueIDRepo unique.UniqueIDRepo
@@ -91,17 +109,11 @@ func (s *TaskSquareService) ListTasks(ctx context.Context, req *schema.TaskListR
 	cond := builder.NewCond()
 	if req.Status != "" {
 		cond = cond.And(builder.Eq{"status": req.Status})
-	} else if !req.IsAdmin {
-		cond = cond.And(builder.In("status",
-			entity.TaskStatusPendingReview,
-			entity.TaskStatusRejected,
-			entity.TaskStatusOpen,
-			entity.TaskStatusInProgress,
-			entity.TaskStatusSubmitted,
-			entity.TaskStatusCompleted,
-			entity.TaskStatusFailed,
-			entity.TaskStatusClosed,
-		))
+		if !req.IsAdmin && !req.Mine && !isPublicTaskStatus(req.Status) {
+			cond = cond.And(builder.Eq{"id": 0})
+		}
+	} else if !req.IsAdmin && !req.Mine {
+		cond = cond.And(builder.In("status", publicTaskStatuses))
 	}
 	if req.Mine {
 		cond = cond.And(builder.Or(builder.Eq{"user_id": req.UserID}, builder.Eq{"assignee_id": req.UserID}))
@@ -129,7 +141,7 @@ func (s *TaskSquareService) GetTask(ctx context.Context, id int, userID string, 
 	if !has {
 		return nil, errors.NotFound(reason.ObjectNotFound)
 	}
-	if !isAdmin && task.Status == entity.TaskStatusPendingReview && task.UserID != userID {
+	if !isAdmin && !isPublicTaskStatus(task.Status) && task.UserID != userID && task.AssigneeID != userID {
 		return nil, errors.Forbidden(reason.ForbiddenError)
 	}
 	return s.taskResp(ctx, task), nil
@@ -259,15 +271,28 @@ func (s *TaskSquareService) SubmitTask(ctx context.Context, req *schema.TaskSubm
 }
 
 func (s *TaskSquareService) ReviewSubmission(ctx context.Context, req *schema.TaskSubmissionReviewReq) error {
-	sub := &entity.TaskSubmission{ID: req.SubmissionID}
-	has, err := s.data.DB.Context(ctx).Get(sub)
-	if err != nil {
-		return err
+	if req.SubmissionID <= 0 && req.TaskID <= 0 {
+		return errors.BadRequest(reason.RequestFormatError)
 	}
-	if !has {
-		return errors.NotFound(reason.ObjectNotFound)
+	var (
+		sub  *entity.TaskSubmission
+		task *entity.Task
+		has  bool
+		err  error
+	)
+	if req.SubmissionID > 0 {
+		sub = &entity.TaskSubmission{ID: req.SubmissionID}
+		has, err = s.data.DB.Context(ctx).Get(sub)
+		if err != nil {
+			return err
+		}
+		if !has {
+			return errors.NotFound(reason.ObjectNotFound)
+		}
+		task = &entity.Task{ID: sub.TaskID}
+	} else {
+		task = &entity.Task{ID: req.TaskID}
 	}
-	task := &entity.Task{ID: sub.TaskID}
 	has, err = s.data.DB.Context(ctx).Get(task)
 	if err != nil {
 		return err
@@ -275,18 +300,38 @@ func (s *TaskSquareService) ReviewSubmission(ctx context.Context, req *schema.Ta
 	if !has {
 		return errors.NotFound(reason.ObjectNotFound)
 	}
+	if sub == nil {
+		pendingSub := &entity.TaskSubmission{}
+		has, err = s.data.DB.Context(ctx).
+			Where("task_id = ? AND status = ?", task.ID, entity.TaskSubmissionStatusPending).
+			Desc("id").Get(pendingSub)
+		if err != nil {
+			return err
+		}
+		if has {
+			sub = pendingSub
+		}
+	}
+	if task.Status != entity.TaskStatusSubmitted || sub != nil && sub.Status != entity.TaskSubmissionStatusPending {
+		return errors.BadRequest(reason.RequestFormatError)
+	}
+	if req.Approved && (task.AssigneeID == "" || task.AssigneeID == "0") {
+		return errors.BadRequest(reason.RequestFormatError)
+	}
 	session := s.data.DB.Context(ctx)
 	if err = session.Begin(); err != nil {
 		return err
 	}
 	if req.Approved {
-		if _, err = session.ID(sub.ID).Cols("status", "review_note", "reviewer_id").Update(&entity.TaskSubmission{
-			Status:     entity.TaskSubmissionStatusApproved,
-			ReviewNote: req.ReviewNote,
-			ReviewerID: req.OperatorID,
-		}); err != nil {
-			_ = session.Rollback()
-			return err
+		if sub != nil {
+			if _, err = session.ID(sub.ID).Cols("status", "review_note", "reviewer_id").Update(&entity.TaskSubmission{
+				Status:     entity.TaskSubmissionStatusApproved,
+				ReviewNote: req.ReviewNote,
+				ReviewerID: req.OperatorID,
+			}); err != nil {
+				_ = session.Rollback()
+				return err
+			}
 		}
 		if _, err = session.ID(task.ID).Cols("status", "completed_at").Update(&entity.Task{
 			Status:      entity.TaskStatusCompleted,
@@ -299,19 +344,21 @@ func (s *TaskSquareService) ReviewSubmission(ctx context.Context, req *schema.Ta
 			_ = session.Rollback()
 			return err
 		}
-		return session.Commit()
-	}
-	if _, err = session.ID(sub.ID).Cols("status", "review_note", "reviewer_id").Update(&entity.TaskSubmission{
-		Status:     entity.TaskSubmissionStatusRejected,
-		ReviewNote: req.ReviewNote,
-		ReviewerID: req.OperatorID,
-	}); err != nil {
-		_ = session.Rollback()
-		return err
-	}
-	if _, err = session.ID(task.ID).Cols("status").Update(&entity.Task{Status: entity.TaskStatusInProgress}); err != nil {
-		_ = session.Rollback()
-		return err
+	} else {
+		if sub != nil {
+			if _, err = session.ID(sub.ID).Cols("status", "review_note", "reviewer_id").Update(&entity.TaskSubmission{
+				Status:     entity.TaskSubmissionStatusRejected,
+				ReviewNote: req.ReviewNote,
+				ReviewerID: req.OperatorID,
+			}); err != nil {
+				_ = session.Rollback()
+				return err
+			}
+		}
+		if _, err = session.ID(task.ID).Cols("status").Update(&entity.Task{Status: entity.TaskStatusInProgress}); err != nil {
+			_ = session.Rollback()
+			return err
+		}
 	}
 	if err = session.Commit(); err != nil {
 		return err

@@ -102,12 +102,17 @@ const AdminTasks: FC = () => {
   };
 
   const submitReview = async (approved: boolean) => {
-    if (!reviewingSubmission?.submission) {
+    if (!reviewingSubmission) {
+      toastStore.getState().show({
+        msg: '未找到任务，无法验收',
+        variant: 'danger',
+      });
       return;
     }
     try {
       await reviewTaskSubmission({
-        submission_id: reviewingSubmission.submission.id,
+        submission_id: reviewingSubmission.submission?.id,
+        task_id: reviewingSubmission.id,
         approved,
         review_note: reviewNote,
       });
@@ -175,20 +180,20 @@ const AdminTasks: FC = () => {
                 </div>
               </td>
               <td className="text-end">
-                <Button
-                  size="sm"
-                  variant="outline-primary"
-                  className="me-2"
-                  onClick={() => openEdit(task)}>
-                  编辑/审核
-                </Button>
-                {task.status === 'submitted' && task.submission ? (
+                {task.status === 'submitted' ? (
                   <Button
                     size="sm"
                     onClick={() => setReviewingSubmission(task)}>
                     验收
                   </Button>
-                ) : null}
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline-primary"
+                    onClick={() => openEdit(task)}>
+                    编辑/审核
+                  </Button>
+                )}
               </td>
             </tr>
           ))}
@@ -305,15 +310,35 @@ const AdminTasks: FC = () => {
         show={Boolean(reviewingSubmission)}
         onHide={() => setReviewingSubmission(null)}>
         <Modal.Header closeButton>
-          <Modal.Title>验收成果</Modal.Title>
+          <Modal.Title>验收任务成果</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <div className="mb-3">
             <strong>{reviewingSubmission?.title}</strong>
             <p className="mt-2 mb-0">
-              {reviewingSubmission?.submission?.content}
+              {reviewingSubmission?.submission?.content || '暂无提交内容'}
             </p>
+            {!reviewingSubmission?.submission ? (
+              <div className="text-secondary small mt-2">
+                当前任务没有提交记录，将按任务状态直接验收。
+              </div>
+            ) : null}
           </div>
+          {reviewingSubmission?.submission?.links?.length ? (
+            <div className="mb-3">
+              <div className="text-secondary small mb-1">提交链接</div>
+              {reviewingSubmission.submission.links.map((link) => (
+                <a
+                  className="d-block text-break"
+                  href={link}
+                  key={link}
+                  target="_blank"
+                  rel="noreferrer">
+                  {link}
+                </a>
+              ))}
+            </div>
+          ) : null}
           <Form.Group>
             <Form.Label>验收说明</Form.Label>
             <Form.Control
@@ -325,10 +350,17 @@ const AdminTasks: FC = () => {
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="outline-danger" onClick={() => submitReview(false)}>
-            退回修改
+          <Button
+            variant="outline-danger"
+            disabled={!reviewingSubmission}
+            onClick={() => submitReview(false)}>
+            不通过
           </Button>
-          <Button onClick={() => submitReview(true)}>通过并发积分</Button>
+          <Button
+            disabled={!reviewingSubmission}
+            onClick={() => submitReview(true)}>
+            通过并发积分
+          </Button>
         </Modal.Footer>
       </Modal>
     </>

@@ -179,8 +179,196 @@ func (c *AIController) GenerateImage(ctx *gin.Context) {
 		return
 	}
 	userID := middleware.GetLoginUserIDFromContext(ctx)
+	if req.Stream {
+		ctx.Header("Content-Type", "text/event-stream")
+		ctx.Header("Cache-Control", "no-cache")
+		ctx.Header("Connection", "keep-alive")
+		ctx.Header("X-Accel-Buffering", "no")
+		err := c.aiChatConfigService.GenerateImageStream(ctx, userID, req, ctx.Writer, func() {
+			if f, ok := ctx.Writer.(http.Flusher); ok {
+				f.Flush()
+			}
+		})
+		if err != nil {
+			writeImageStreamError(ctx.Writer, err)
+			if f, ok := ctx.Writer.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		return
+	}
 	resp, err := c.aiChatConfigService.GenerateImage(ctx, userID, req)
 	handler.HandleResponse(ctx, err, resp)
+}
+
+func (c *AIController) SaveAgentImageGeneration(ctx *gin.Context) {
+	if c.aiChatConfigService == nil {
+		handler.HandleResponse(ctx, errors.BadRequest("ai chat config is not available"), nil)
+		return
+	}
+	req := &schema.AIImageAgentGenerationSaveReq{}
+	if handler.BindAndCheck(ctx, req) {
+		return
+	}
+	userID := middleware.GetLoginUserIDFromContext(ctx)
+	resp, err := c.aiChatConfigService.SaveAgentImageGeneration(ctx, userID, req)
+	handler.HandleResponse(ctx, err, resp)
+}
+
+func writeImageStreamError(w io.Writer, err error) {
+	payload, _ := json.Marshal(map[string]any{
+		"type":  "image_generation.failed",
+		"error": map[string]any{"message": err.Error()},
+	})
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+}
+
+func (c *AIController) AgentResponses(ctx *gin.Context) {
+	if !c.ensureAIChatEnabled(ctx) {
+		return
+	}
+	if c.aiChatConfigService == nil {
+		handler.HandleResponse(ctx, errors.BadRequest("ai chat config is not available"), nil)
+		return
+	}
+	req := &schema.AIAgentResponsesReq{}
+	if handler.BindAndCheck(ctx, req) {
+		return
+	}
+	if req.ReasoningEffort != "" && !validReasoningEffort(req.ReasoningEffort) {
+		handler.HandleResponse(ctx, errors.BadRequest("invalid reasoning effort"), nil)
+		return
+	}
+
+	upstream, err := c.aiChatConfigService.ResolveImageAgentUpstream(ctx, req.ImageModel)
+	if err != nil {
+		handler.HandleResponse(ctx, err, nil)
+		return
+	}
+
+	body := map[string]any{
+		"model":  upstream.ProviderModelID,
+		"input":  req.Input,
+		"stream": req.Stream && upstream.SupportsStream,
+	}
+	if req.Instructions != "" {
+		body["instructions"] = req.Instructions
+	}
+	if req.Tools != nil {
+		body["tools"] = req.Tools
+	}
+	if req.ToolChoice != nil {
+		body["tool_choice"] = req.ToolChoice
+	}
+	if req.MaxOutputTokens > 0 {
+		body["max_output_tokens"] = req.MaxOutputTokens
+	}
+	if req.ReasoningEffort != "" {
+		body["reasoning"] = map[string]any{"effort": req.ReasoningEffort}
+	}
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		handler.HandleResponse(ctx, errors.BadRequest(err.Error()), nil)
+		return
+	}
+	baseURL := strings.TrimRight(upstream.BaseURL, "/")
+	const maxAttempts = 4
+	var resp *http.Response
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx.Request.Context(), http.MethodPost, baseURL+"/responses", bytes.NewReader(bodyBytes))
+		if err != nil {
+			handler.HandleResponse(ctx, errors.BadRequest(err.Error()), nil)
+			return
+		}
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", upstream.APIKey))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err = http.DefaultClient.Do(httpReq)
+		if err != nil {
+			handler.HandleResponse(ctx, errors.BadRequest(err.Error()), nil)
+			return
+		}
+		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+			break
+		}
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if attempt < maxAttempts && shouldRetryAgentResponsesProxy(resp.StatusCode, bodyBytes) {
+			delay := agentResponsesProxyRetryDelay(attempt)
+			log.Warnf("retrying agent responses proxy status=%d attempt=%d delay=%s body=%s", resp.StatusCode, attempt, delay, string(bodyBytes))
+			if err := sleepWithRequestContext(ctx.Request.Context(), delay); err != nil {
+				handler.HandleResponse(ctx, errors.BadRequest(err.Error()), nil)
+				return
+			}
+			continue
+		}
+		handler.HandleResponse(ctx, errors.BadRequest(fmt.Sprintf("responses status %d: %s", resp.StatusCode, string(bodyBytes))), nil)
+		return
+	}
+	if resp == nil {
+		handler.HandleResponse(ctx, errors.BadRequest("responses request did not return response"), nil)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		handler.HandleResponse(ctx, errors.BadRequest(fmt.Sprintf("responses status %d: %s", resp.StatusCode, string(bodyBytes))), nil)
+		return
+	}
+
+	for key, values := range resp.Header {
+		if strings.EqualFold(key, "Content-Length") || strings.EqualFold(key, "Transfer-Encoding") {
+			continue
+		}
+		for _, value := range values {
+			ctx.Writer.Header().Add(key, value)
+		}
+	}
+	ctx.Status(resp.StatusCode)
+	if _, err := io.Copy(ctx.Writer, resp.Body); err != nil {
+		log.Errorf("failed to proxy agent responses: %v", err)
+	}
+	if f, ok := ctx.Writer.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func shouldRetryAgentResponsesProxy(statusCode int, body []byte) bool {
+	if statusCode != http.StatusTooManyRequests && statusCode != http.StatusBadGateway && statusCode != http.StatusServiceUnavailable {
+		return false
+	}
+	text := strings.ToLower(string(body))
+	return statusCode == http.StatusServiceUnavailable ||
+		strings.Contains(text, "rate limit") ||
+		strings.Contains(text, "try again") ||
+		strings.Contains(text, "temporarily unavailable") ||
+		strings.Contains(text, "service unavailable") ||
+		strings.Contains(text, "upstream_error") ||
+		strings.Contains(text, "upstream request failed")
+}
+
+func agentResponsesProxyRetryDelay(attempt int) time.Duration {
+	switch attempt {
+	case 1:
+		return 300 * time.Millisecond
+	case 2:
+		return 900 * time.Millisecond
+	default:
+		return 1800 * time.Millisecond
+	}
+}
+
+func sleepWithRequestContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (c *AIController) EditImage(ctx *gin.Context) {
@@ -211,6 +399,58 @@ func (c *AIController) GetImageGenerations(ctx *gin.Context) {
 	userID := middleware.GetLoginUserIDFromContext(ctx)
 	resp, err := c.aiChatConfigService.ListUserImageGenerations(ctx, userID, limit)
 	handler.HandleResponse(ctx, err, resp)
+}
+
+func (c *AIController) DeleteImageGeneration(ctx *gin.Context) {
+	if c.aiChatConfigService == nil {
+		handler.HandleResponse(ctx, errors.BadRequest("ai chat config is not available"), nil)
+		return
+	}
+	req := &schema.AIImageGenerationDeleteReq{}
+	if handler.BindAndCheck(ctx, req) {
+		return
+	}
+	userID := middleware.GetLoginUserIDFromContext(ctx)
+	err := c.aiChatConfigService.DeleteUserImageGeneration(ctx, userID, req.GenerationID)
+	handler.HandleResponse(ctx, err, nil)
+}
+
+func (c *AIController) GetImageAgentConversations(ctx *gin.Context) {
+	if c.aiChatConfigService == nil {
+		handler.HandleResponse(ctx, errors.BadRequest("ai chat config is not available"), nil)
+		return
+	}
+	userID := middleware.GetLoginUserIDFromContext(ctx)
+	resp, err := c.aiChatConfigService.ListUserImageAgentConversations(ctx, userID)
+	handler.HandleResponse(ctx, err, resp)
+}
+
+func (c *AIController) SaveImageAgentConversation(ctx *gin.Context) {
+	if c.aiChatConfigService == nil {
+		handler.HandleResponse(ctx, errors.BadRequest("ai chat config is not available"), nil)
+		return
+	}
+	req := &schema.AIImageAgentConversationSaveReq{}
+	if handler.BindAndCheck(ctx, req) {
+		return
+	}
+	userID := middleware.GetLoginUserIDFromContext(ctx)
+	resp, err := c.aiChatConfigService.SaveUserImageAgentConversation(ctx, userID, req)
+	handler.HandleResponse(ctx, err, resp)
+}
+
+func (c *AIController) DeleteImageAgentConversation(ctx *gin.Context) {
+	if c.aiChatConfigService == nil {
+		handler.HandleResponse(ctx, errors.BadRequest("ai chat config is not available"), nil)
+		return
+	}
+	req := &schema.AIImageAgentConversationDeleteReq{}
+	if handler.BindAndCheck(ctx, req) {
+		return
+	}
+	userID := middleware.GetLoginUserIDFromContext(ctx)
+	err := c.aiChatConfigService.DeleteUserImageAgentConversation(ctx, userID, req.ConversationID)
+	handler.HandleResponse(ctx, err, nil)
 }
 
 func (c *AIController) GetImageAsset(ctx *gin.Context) {

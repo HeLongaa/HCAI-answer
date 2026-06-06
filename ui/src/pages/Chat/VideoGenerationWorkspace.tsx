@@ -46,6 +46,7 @@ import {
   getAiVideoModels,
 } from '@/services/client/ai';
 import Storage from '@/utils/storage';
+import './imageGeneration.scss';
 
 interface ReferenceImage {
   id: string;
@@ -325,10 +326,9 @@ const VideoGenerationWorkspace: FC<IProps> = ({
   const [error, setError] = useState('');
   const [actionNotice, setActionNotice] = useState('');
   const [generating, setGenerating] = useState(false);
-  const [mobileTasksOpen, setMobileTasksOpen] = useState(false);
-  const [mobileTaskPortalHost, setMobileTaskPortalHost] =
-    useState<Element | null>(null);
   const [sidebarTaskPortalHost, setSidebarTaskPortalHost] =
+    useState<Element | null>(null);
+  const [mobileSideNavTaskPortalHost, setMobileSideNavTaskPortalHost] =
     useState<Element | null>(null);
   const [previewVideo, setPreviewVideo] = useState<PreviewVideo | null>(null);
   const [activeVideoPlaying, setActiveVideoPlaying] = useState(false);
@@ -490,38 +490,29 @@ const VideoGenerationWorkspace: FC<IProps> = ({
   }, [previewVideo]);
 
   useEffect(() => {
-    const handleToggleVideoTasks = (evt: Event) => {
-      const open = (evt as CustomEvent<{ open?: boolean }>).detail?.open;
-      setMobileTasksOpen((prev) => (typeof open === 'boolean' ? open : !prev));
-    };
-    window.addEventListener('hcai-toggle-video-tasks', handleToggleVideoTasks);
-    return () => {
-      window.removeEventListener(
-        'hcai-toggle-video-tasks',
-        handleToggleVideoTasks,
-      );
-      window.dispatchEvent(
-        new CustomEvent('hcai-video-tasks-open-change', {
-          detail: { open: false },
-        }),
-      );
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!mobileTasksOpen) {
-      setMobileTaskPortalHost(null);
-      return;
-    }
-    setMobileTaskPortalHost(
-      document.querySelector('.hcai-mobile-conversation-menu'),
-    );
-  }, [mobileTasksOpen]);
-
-  useEffect(() => {
     setSidebarTaskPortalHost(
       document.querySelector('#hcai-sidebar-video-tasks'),
     );
+  }, []);
+
+  useEffect(() => {
+    let frame = 0;
+    let cancelled = false;
+
+    const resolveMobileSideNavTaskHost = () => {
+      if (cancelled) return;
+      const host = document.querySelector('#hcai-mobile-sidenav-video-tasks');
+      setMobileSideNavTaskPortalHost(host);
+      if (!host) {
+        frame = window.requestAnimationFrame(resolveMobileSideNavTaskHost);
+      }
+    };
+
+    resolveMobileSideNavTaskHost();
+    return () => {
+      cancelled = true;
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   useEffect(() => {
@@ -749,19 +740,10 @@ const VideoGenerationWorkspace: FC<IProps> = ({
     runVideoTask(task);
   };
 
-  const closeMobileTasks = () => {
-    setMobileTasksOpen(false);
-    window.dispatchEvent(
-      new CustomEvent('hcai-video-tasks-open-change', {
-        detail: { open: false },
-      }),
-    );
-  };
-
   const selectTask = (taskID: string, closePanel = false) => {
     setActiveTaskID(taskID);
     if (closePanel) {
-      closeMobileTasks();
+      window.dispatchEvent(new CustomEvent('hcai-close-mobile-side-nav'));
     }
   };
 
@@ -865,15 +847,8 @@ const VideoGenerationWorkspace: FC<IProps> = ({
       {sidebarTaskPortalHost
         ? createPortal(renderTaskPanel(false, false), sidebarTaskPortalHost)
         : null}
-      {mobileTasksOpen && mobileTaskPortalHost
-        ? createPortal(
-            <div
-              id="hcai-mobile-video-tasks"
-              className="hcai-mobile-conversation-panel hcai-mobile-task-panel">
-              {renderTaskPanel(true)}
-            </div>,
-            mobileTaskPortalHost,
-          )
+      {mobileSideNavTaskPortalHost
+        ? createPortal(renderTaskPanel(true), mobileSideNavTaskPortalHost)
         : null}
       <section className="hcai-image-composer">
         <div className="hcai-image-head">

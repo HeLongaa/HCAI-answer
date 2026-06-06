@@ -20,6 +20,7 @@
 package ai_chat_config
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -30,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"mime"
 	"net/http"
 	"net/url"
@@ -58,6 +60,7 @@ var (
 	modelIDPattern    = regexp.MustCompile(`^[a-z0-9_-]+$`)
 	base64DataPattern = regexp.MustCompile(`"b64_json"\s*:\s*"[^"]+"`)
 	dataURLPattern    = regexp.MustCompile(`data:image/[^;]+;base64,[A-Za-z0-9+/=_-]+`)
+	retryAfterPattern = regexp.MustCompile(`(?i)try again in\s+(\d+)\s*ms`)
 )
 
 type AiChatConfigService interface {
@@ -106,9 +109,16 @@ type AiChatConfigService interface {
 	DeleteImageModel(ctx context.Context, id int) error
 	GetImageSetting(ctx context.Context) (*schema.AIImageSettingResp, error)
 	SaveImageSetting(ctx context.Context, req *schema.AIImageSettingReq) (*schema.AIImageSettingResp, error)
+	ResolveImageAgentUpstream(ctx context.Context, siteImageModelID string) (*schema.AIImageAgentUpstreamResp, error)
 	GenerateImage(ctx context.Context, userID string, req *schema.AIImageGenerateReq) (*schema.AIImageGenerateResp, error)
+	GenerateImageStream(ctx context.Context, userID string, req *schema.AIImageGenerateReq, writer io.Writer, flush func()) error
+	SaveAgentImageGeneration(ctx context.Context, userID string, req *schema.AIImageAgentGenerationSaveReq) (*schema.AIImageGenerateResp, error)
 	EditImage(ctx context.Context, userID string, req *schema.AIImageEditReq) (*schema.AIImageGenerateResp, error)
 	ListUserImageGenerations(ctx context.Context, userID string, limit int) ([]*schema.AIImageGenerationResp, error)
+	DeleteUserImageGeneration(ctx context.Context, userID, generationID string) error
+	ListUserImageAgentConversations(ctx context.Context, userID string) ([]*schema.AIImageAgentConversationResp, error)
+	SaveUserImageAgentConversation(ctx context.Context, userID string, req *schema.AIImageAgentConversationSaveReq) (*schema.AIImageAgentConversationResp, error)
+	DeleteUserImageAgentConversation(ctx context.Context, userID, conversationID string) error
 	GetUserImageFilePath(ctx context.Context, userID, ownerID, filename string) (string, error)
 	ListVideoProviders(ctx context.Context) ([]*schema.AIVideoProviderResp, error)
 	CreateVideoProvider(ctx context.Context, req *schema.AIVideoProviderReq) (*schema.AIVideoProviderResp, error)
@@ -1067,10 +1077,28 @@ func (s *aiChatConfigService) SaveImageModel(ctx context.Context, id int, req *s
 	if strings.TrimSpace(req.DefaultSize) == "" {
 		req.DefaultSize = "1024x1024"
 	}
+	req.APIMode = normalizeImageAPIMode(req.APIMode)
+	req.DefaultQuality = normalizeImageDefaultQuality(req.DefaultQuality)
+	req.DefaultFormat = normalizeImageDefaultFormat(req.DefaultFormat)
+	extraConfig, err := s.mergeImageModelExtraConfig(ctx, req.ExtraConfig, req.AgentModelID, req.Upstreams)
+	if err != nil {
+		return nil, err
+	}
 	if _, exist, err := s.repo.GetImageProvider(ctx, req.ProviderID); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	} else if !exist {
 		return nil, errors.BadRequest("provider is not available")
+	}
+	siteModelID := strings.TrimSpace(req.SiteModelID)
+	existingBySiteID, siteIDExists, err := s.repo.GetImageModelBySiteModelID(ctx, siteModelID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if siteIDExists && id > 0 && existingBySiteID.ID != id {
+		return nil, errors.BadRequest("site_model_id already exists")
+	}
+	if siteIDExists && id == 0 {
+		id = existingBySiteID.ID
 	}
 	model := &entity.AIImageModel{}
 	if id > 0 {
@@ -1084,11 +1112,18 @@ func (s *aiChatConfigService) SaveImageModel(ctx context.Context, id int, req *s
 		model = current
 	}
 	model.ProviderID = req.ProviderID
-	model.SiteModelID = strings.TrimSpace(req.SiteModelID)
+	model.SiteModelID = siteModelID
 	model.ProviderModelID = strings.TrimSpace(req.ProviderModelID)
 	model.DisplayName = req.DisplayName
 	model.Description = req.Description
 	model.DefaultSize = req.DefaultSize
+	model.APIMode = req.APIMode
+	model.SupportsEdits = req.SupportsEdits
+	model.SupportsRefs = req.SupportsRefs
+	model.SupportsStream = req.SupportsStream
+	model.DefaultQuality = req.DefaultQuality
+	model.DefaultFormat = req.DefaultFormat
+	model.ExtraConfig = extraConfig
 	model.Enabled = req.Enabled
 	model.SortOrder = req.SortOrder
 	if err := s.repo.SaveImageModel(ctx, model); err != nil {
@@ -1133,6 +1168,42 @@ func (s *aiChatConfigService) SaveImageSetting(ctx context.Context, req *schema.
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
 	return s.formatImageSetting(setting), nil
+}
+
+func (s *aiChatConfigService) ResolveImageAgentUpstream(ctx context.Context, siteImageModelID string) (*schema.AIImageAgentUpstreamResp, error) {
+	if err := s.ensureImageTables(ctx); err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	siteImageModelID = strings.TrimSpace(siteImageModelID)
+	if siteImageModelID == "" {
+		return nil, errors.BadRequest("image model is required")
+	}
+	model, exist, err := s.repo.GetImageModelBySiteModelID(ctx, siteImageModelID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if !exist || !model.Enabled {
+		return nil, errors.BadRequest("image model is not available")
+	}
+	upstream, err := s.selectImageModelUpstream(ctx, model)
+	if err != nil {
+		return nil, err
+	}
+	provider := upstream.Provider
+	upstreamModel := upstream.Model
+	agentModelID := getImageAgentModelID(upstreamModel)
+	if agentModelID == "" {
+		return nil, errors.BadRequest("agent_model_id is required for image agent")
+	}
+	return &schema.AIImageAgentUpstreamResp{
+		ImageModelID:    upstreamModel.SiteModelID,
+		ProviderID:      provider.ID,
+		ProviderName:    provider.Name,
+		ProviderModelID: agentModelID,
+		BaseURL:         provider.BaseURL,
+		APIKey:          provider.APIKey,
+		SupportsStream:  upstreamModel.SupportsStream,
+	}, nil
 }
 
 func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, req *schema.AIImageGenerateReq) (*schema.AIImageGenerateResp, error) {
@@ -1181,19 +1252,25 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 	if !exist || !model.Enabled {
 		return nil, errors.BadRequest("image model is not available")
 	}
-	provider, exist, err := s.repo.GetImageProvider(ctx, model.ProviderID)
+	upstream, err := s.selectImageModelUpstream(ctx, model)
 	if err != nil {
-		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		return nil, err
 	}
-	if !exist || !provider.Enabled {
-		return nil, errors.BadRequest("image provider is not available")
-	}
+	provider := upstream.Provider
+	upstreamModel := upstream.Model
 	if strings.TrimSpace(req.Size) == "" {
 		req.Size = model.DefaultSize
 	}
 	req.Size = normalizeOpenAIImageSize(req.Size, req.AspectRatio)
 	req.AspectRatio = imageAspectRatio(req.Size)
+	if strings.TrimSpace(req.Quality) == "" {
+		req.Quality = model.DefaultQuality
+	}
 	req.Quality = normalizeOpenAIImageQuality(req.Quality)
+	req.OutputFormat = normalizeImageDefaultFormat(fallbackText(req.OutputFormat, model.DefaultFormat))
+	req.Moderation = normalizeImageModeration(req.Moderation)
+	req.Background = normalizeImageBackground(req.Background)
+	referenceImagesJSON, _ := json.Marshal(req.ReferenceImages)
 	generationID := "img_" + uid.IDStr()
 	runCtx := context.WithoutCancel(ctx)
 	setting, _ := s.GetImageSetting(runCtx)
@@ -1205,13 +1282,20 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 		SiteModelID:     model.SiteModelID,
 		ProviderID:      provider.ID,
 		ProviderName:    provider.Name,
-		ProviderModelID: model.ProviderModelID,
+		ProviderModelID: upstreamModel.ProviderModelID,
 		Prompt:          req.Prompt,
 		NegativePrompt:  req.NegativePrompt,
 		AspectRatio:     req.AspectRatio,
 		Size:            req.Size,
 		Style:           req.Style,
 		Quality:         req.Quality,
+		OutputFormat:    req.OutputFormat,
+		Compression:     req.Compression,
+		Moderation:      req.Moderation,
+		Background:      req.Background,
+		ReferenceImages: string(referenceImagesJSON),
+		MaskImage:       req.MaskImage,
+		APIMode:         normalizeImageAPIMode(model.APIMode),
 		Count:           req.Count,
 		ImageURLs:       string(pendingURLs),
 		Status:          "generating",
@@ -1223,13 +1307,13 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 	}
 	log.Infof(
 		"ai image generation start generation_id=%s user_id=%s site_model=%s provider=%s provider_model=%s size=%s aspect_ratio=%s quality=%s count=%d references=%d",
-		generationID, userID, model.SiteModelID, provider.Name, model.ProviderModelID, req.Size, req.AspectRatio, req.Quality, req.Count, len(req.ReferenceImages),
+		generationID, userID, model.SiteModelID, provider.Name, upstreamModel.ProviderModelID, req.Size, req.AspectRatio, req.Quality, req.Count, len(req.ReferenceImages),
 	)
-	imageURLs, err := s.callAndSaveImages(runCtx, provider, model, generationID, userID, req)
+	imageURLs, err := s.callAndSaveImages(runCtx, provider, upstreamModel, generationID, userID, req)
 	if err != nil {
 		log.Errorf(
 			"ai image generation failed generation_id=%s user_id=%s site_model=%s provider=%s provider_model=%s references=%d error=%v",
-			generationID, userID, model.SiteModelID, provider.Name, model.ProviderModelID, len(req.ReferenceImages), err,
+			generationID, userID, model.SiteModelID, provider.Name, upstreamModel.ProviderModelID, len(req.ReferenceImages), err,
 		)
 		updateErr := s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{
 			Status: "failed",
@@ -1251,6 +1335,560 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
 	log.Infof("ai image generation completed generation_id=%s user_id=%s image_count=%d", generationID, userID, len(imageURLs))
+	return &schema.AIImageGenerateResp{
+		GenerationID: generationID,
+		Size:         req.Size,
+		ImageURLs:    imageURLs,
+		ExpiresAt:    expiresAt.Unix(),
+	}, nil
+}
+
+func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID string, req *schema.AIImageGenerateReq, writer io.Writer, flush func()) error {
+	if err := s.ensureImageTables(ctx); err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	req.Stream = true
+	if req.PartialImages <= 0 {
+		req.PartialImages = 1
+	}
+	if req.PartialImages > 3 {
+		req.PartialImages = 3
+	}
+	if userID == "" {
+		return errors.Unauthorized(reason.UnauthorizedError)
+	}
+	req.Prompt = strings.TrimSpace(req.Prompt)
+	req.Model = strings.TrimSpace(req.Model)
+	if req.Prompt == "" || req.Model == "" {
+		return errors.BadRequest("prompt and model are required")
+	}
+	if req.Count <= 0 {
+		req.Count = 1
+	}
+	if req.Count != 1 {
+		return errors.BadRequest("stream image generation only supports count=1")
+	}
+	if len(req.ReferenceImages) > 0 || strings.TrimSpace(req.MaskImage) != "" {
+		return errors.BadRequest("stream image generation does not support reference images yet")
+	}
+	user, exist, err := s.userRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if !exist {
+		return errors.BadRequest(reason.UserNotFound)
+	}
+	plan, _, err := s.getEffectiveUserPlan(ctx, user)
+	if err != nil {
+		return err
+	}
+	if plan.ImageQuota != -1 {
+		monthStart, monthEnd := currentMonthRange()
+		used, err := s.repo.CountUserImageGenerations(ctx, userID, monthStart, monthEnd)
+		if err != nil {
+			return errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
+		if used+req.Count > plan.ImageQuota {
+			return errors.BadRequest("image quota is insufficient")
+		}
+	}
+	model, exist, err := s.repo.GetImageModelBySiteModelID(ctx, req.Model)
+	if err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if !exist || !model.Enabled {
+		return errors.BadRequest("image model is not available")
+	}
+	apiMode := normalizeImageAPIMode(model.APIMode)
+	if !model.SupportsStream {
+		return errors.BadRequest("image model does not support stream generation")
+	}
+	upstream, err := s.selectImageModelUpstream(ctx, model)
+	if err != nil {
+		return err
+	}
+	provider := upstream.Provider
+	upstreamModel := upstream.Model
+	if strings.TrimSpace(req.Size) == "" {
+		req.Size = model.DefaultSize
+	}
+	req.Size = normalizeOpenAIImageSize(req.Size, req.AspectRatio)
+	req.AspectRatio = imageAspectRatio(req.Size)
+	if strings.TrimSpace(req.Quality) == "" {
+		req.Quality = model.DefaultQuality
+	}
+	req.Quality = normalizeOpenAIImageQuality(req.Quality)
+	req.OutputFormat = normalizeImageDefaultFormat(fallbackText(req.OutputFormat, model.DefaultFormat))
+	req.Moderation = normalizeImageModeration(req.Moderation)
+	req.Background = normalizeImageBackground(req.Background)
+
+	generationID := "img_" + uid.IDStr()
+	runCtx := context.WithoutCancel(ctx)
+	setting, _ := s.GetImageSetting(runCtx)
+	expiresAt := time.Now().AddDate(0, 0, setting.RetentionDays)
+	pendingURLs, _ := json.Marshal([]string{})
+	referenceImagesJSON, _ := json.Marshal(req.ReferenceImages)
+	record := &entity.AIImageGeneration{
+		GenerationID:    generationID,
+		UserID:          userID,
+		SiteModelID:     model.SiteModelID,
+		ProviderID:      provider.ID,
+		ProviderName:    provider.Name,
+		ProviderModelID: upstreamModel.ProviderModelID,
+		Prompt:          req.Prompt,
+		NegativePrompt:  req.NegativePrompt,
+		AspectRatio:     req.AspectRatio,
+		Size:            req.Size,
+		Style:           req.Style,
+		Quality:         req.Quality,
+		OutputFormat:    req.OutputFormat,
+		Compression:     req.Compression,
+		Moderation:      req.Moderation,
+		Background:      req.Background,
+		ReferenceImages: string(referenceImagesJSON),
+		APIMode:         apiMode,
+		Count:           1,
+		ImageURLs:       string(pendingURLs),
+		Status:          "generating",
+		ExpiresAt:       expiresAt,
+	}
+	if err := s.repo.CreateImageGeneration(runCtx, record); err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+
+	endpoint := "/images/generations"
+	payload := s.buildImageStreamPayload(upstreamModel, req)
+	if apiMode == "responses" {
+		endpoint = "/responses"
+		payload = s.buildResponsesImageStreamPayload(upstreamModel, req)
+	}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(provider.BaseURL, "/")+endpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", provider.APIKey))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream, application/json")
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(resp.Body)
+		err := fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+		_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
+		return err
+	}
+
+	finalBody, err := s.proxyAndSaveImageStream(ctx, runCtx, resp.Body, writer, flush, userID, generationID, req.Size)
+	if err != nil {
+		_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
+		return err
+	}
+	imageURLs, err := s.saveImageAPIResponse(runCtx, userID, generationID, finalBody)
+	if err != nil {
+		_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
+		return err
+	}
+	rawURLs, _ := json.Marshal(imageURLs)
+	if err := s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{
+		Count:     len(imageURLs),
+		ImageURLs: string(rawURLs),
+		Status:    "completed",
+		Error:     "",
+	}, "count", "image_urls", "status", "error"); err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	completed := map[string]any{
+		"object":        "image.generation.result",
+		"generation_id": generationID,
+		"size":          req.Size,
+		"expires_at":    expiresAt.Unix(),
+		"data":          imageURLsToSSEData(imageURLs),
+	}
+	writeImageSSE(writer, completed)
+	flush()
+	return nil
+}
+
+func (s *aiChatConfigService) proxyAndSaveImageStream(
+	ctx context.Context,
+	_ context.Context,
+	body io.Reader,
+	writer io.Writer,
+	flush func(),
+	userID string,
+	generationID string,
+	size string,
+) ([]byte, error) {
+	reader := bufio.NewReader(body)
+	var block strings.Builder
+	var finalBody []byte
+
+	processBlock := func(raw string) error {
+		dataLines := make([]string, 0)
+		for _, line := range strings.Split(raw, "\n") {
+			line = strings.TrimRight(line, "\r")
+			if line == "" || strings.HasPrefix(line, ":") {
+				continue
+			}
+			if strings.HasPrefix(line, "data:") {
+				dataLines = append(dataLines, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
+			}
+		}
+		data := strings.TrimSpace(strings.Join(dataLines, "\n"))
+		if data == "" || data == "[DONE]" {
+			return nil
+		}
+
+		var event map[string]any
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			return err
+		}
+		eventType, _ := event["type"].(string)
+		object, _ := event["object"].(string)
+
+		if eventType == "image_generation.partial_image" ||
+			eventType == "image_edit.partial_image" ||
+			eventType == "response.image_generation_call.partial_image" {
+			writeImageSSE(writer, event)
+			flush()
+			return nil
+		}
+
+		if object == "image.generation.result" || object == "image.edit.result" {
+			finalBody = []byte(data)
+			writeImageSSE(writer, event)
+			flush()
+			return nil
+		}
+
+		if eventType == "image_generation.completed" || eventType == "image_edit.completed" {
+			finalBody = imageCompletedEventBody(event, size)
+			writeImageSSE(writer, event)
+			flush()
+			return nil
+		}
+
+		if eventType == "response.output_item.done" || eventType == "response.completed" {
+			if body := responsesStreamEventBody(event); len(body) > 0 {
+				if len(finalBody) == 0 || responseBodyHasImageData(body) {
+					finalBody = body
+				}
+				writeImageSSE(writer, event)
+				flush()
+			}
+			return nil
+		}
+		return nil
+	}
+
+	for {
+		line, err := reader.ReadString('\n')
+		if line != "" {
+			block.WriteString(line)
+			if strings.TrimRight(line, "\r\n") == "" {
+				if err := processBlock(block.String()); err != nil {
+					return nil, err
+				}
+				block.Reset()
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(block.String()) != "" {
+		if err := processBlock(block.String()); err != nil {
+			return nil, err
+		}
+	}
+	if len(finalBody) == 0 {
+		return nil, fmt.Errorf("stream image generation did not return final image data")
+	}
+	log.Infof("ai image stream final received generation_id=%s user_id=%s bytes=%d", generationID, userID, len(finalBody))
+	return finalBody, nil
+}
+
+func imageCompletedEventBody(event map[string]any, size string) []byte {
+	item := map[string]any{}
+	for _, key := range []string{"url", "b64_json", "revised_prompt", "size", "quality", "output_format", "output_compression", "moderation"} {
+		if value, ok := event[key]; ok {
+			item[key] = value
+		}
+	}
+	if _, ok := item["size"]; !ok && size != "" {
+		item["size"] = size
+	}
+	body, _ := json.Marshal(map[string]any{"data": []map[string]any{item}})
+	return body
+}
+
+func responsesStreamEventBody(event map[string]any) []byte {
+	if response, ok := event["response"].(map[string]any); ok {
+		body, _ := json.Marshal(response)
+		return body
+	}
+	if item, ok := event["item"].(map[string]any); ok {
+		if itemType, _ := item["type"].(string); itemType == "image_generation_call" {
+			body, _ := json.Marshal(map[string]any{"output": []map[string]any{item}})
+			return body
+		}
+	}
+	return nil
+}
+
+func responseBodyHasImageData(body []byte) bool {
+	var parsed struct {
+		Data []struct {
+			URL     string `json:"url"`
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+		Output []struct {
+			Type    string `json:"type"`
+			Result  string `json:"result"`
+			Content []struct {
+				Result   string `json:"result"`
+				ImageURL string `json:"image_url"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return false
+	}
+	for _, item := range parsed.Data {
+		if item.URL != "" || item.B64JSON != "" {
+			return true
+		}
+	}
+	for _, item := range parsed.Output {
+		if item.Type == "image_generation_call" && item.Result != "" {
+			return true
+		}
+		for _, entry := range item.Content {
+			if entry.Result != "" || entry.ImageURL != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func imageURLsToSSEData(imageURLs []string) []map[string]any {
+	data := make([]map[string]any, 0, len(imageURLs))
+	for _, imageURL := range imageURLs {
+		data = append(data, map[string]any{"url": imageURL})
+	}
+	return data
+}
+
+func writeImageSSE(writer io.Writer, payload any) {
+	body, _ := json.Marshal(payload)
+	_, _ = fmt.Fprintf(writer, "data: %s\n\n", body)
+}
+
+func (s *aiChatConfigService) buildImageStreamPayload(model *entity.AIImageModel, req *schema.AIImageGenerateReq) map[string]any {
+	payload := map[string]any{
+		"model":          model.ProviderModelID,
+		"prompt":         buildImagePrompt(req),
+		"size":           req.Size,
+		"stream":         true,
+		"partial_images": req.PartialImages,
+	}
+	if shouldRequestImageResponseFormat(model.ProviderModelID) {
+		payload["response_format"] = "b64_json"
+	}
+	if req.Quality != "" {
+		payload["quality"] = req.Quality
+	}
+	if req.OutputFormat != "" {
+		payload["output_format"] = req.OutputFormat
+	}
+	if req.OutputFormat != "png" && req.Compression > 0 {
+		payload["output_compression"] = max(0, min(100, req.Compression))
+	}
+	if req.Moderation != "" {
+		payload["moderation"] = req.Moderation
+	}
+	if req.Background != "" && req.Background != "auto" {
+		payload["background"] = req.Background
+	}
+	return payload
+}
+
+func (s *aiChatConfigService) buildResponsesImageStreamPayload(model *entity.AIImageModel, req *schema.AIImageGenerateReq) map[string]any {
+	tool := map[string]any{
+		"type":           "image_generation",
+		"action":         "generate",
+		"partial_images": req.PartialImages,
+	}
+	if strings.TrimSpace(req.Size) != "" && req.Size != "auto" {
+		tool["size"] = req.Size
+	}
+	if req.Quality != "" {
+		tool["quality"] = req.Quality
+	}
+	if req.OutputFormat != "" {
+		tool["output_format"] = req.OutputFormat
+	}
+	if req.OutputFormat != "png" && req.Compression > 0 {
+		tool["output_compression"] = max(0, min(100, req.Compression))
+	}
+	if req.Moderation != "" {
+		tool["moderation"] = req.Moderation
+	}
+	if req.Background != "" && req.Background != "auto" {
+		tool["background"] = req.Background
+	}
+	return map[string]any{
+		"model":       getImageResponsesModelID(model),
+		"stream":      true,
+		"tool_choice": map[string]any{"type": "image_generation"},
+		"input": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": buildImagePrompt(req)},
+				},
+			},
+		},
+		"tools": []map[string]any{tool},
+	}
+}
+
+func (s *aiChatConfigService) SaveAgentImageGeneration(ctx context.Context, userID string, req *schema.AIImageAgentGenerationSaveReq) (*schema.AIImageGenerateResp, error) {
+	if err := s.ensureImageTables(ctx); err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if userID == "" {
+		return nil, errors.Unauthorized(reason.UnauthorizedError)
+	}
+	req.Prompt = strings.TrimSpace(req.Prompt)
+	req.Model = strings.TrimSpace(req.Model)
+	if req.Prompt == "" || req.Model == "" {
+		return nil, errors.BadRequest("prompt and model are required")
+	}
+	if len(req.Images) == 0 {
+		return nil, errors.BadRequest("images are required")
+	}
+	if len(req.Images) > 4 {
+		return nil, errors.BadRequest("images cannot be greater than 4")
+	}
+	user, exist, err := s.userRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if !exist || user == nil {
+		return nil, errors.BadRequest(reason.UserNotFound)
+	}
+	model, exist, err := s.repo.GetImageModelBySiteModelID(ctx, req.Model)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if !exist || !model.Enabled {
+		return nil, errors.BadRequest("image model is not available")
+	}
+	provider, exist, err := s.repo.GetImageProvider(ctx, model.ProviderID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if !exist || !provider.Enabled {
+		return nil, errors.BadRequest("image provider is not available")
+	}
+	if strings.TrimSpace(req.Size) == "" {
+		req.Size = model.DefaultSize
+	}
+	req.Size = normalizeOpenAIImageSize(req.Size, req.AspectRatio)
+	req.AspectRatio = imageAspectRatio(req.Size)
+	if strings.TrimSpace(req.Quality) == "" {
+		req.Quality = model.DefaultQuality
+	}
+	req.Quality = normalizeOpenAIImageQuality(req.Quality)
+	req.OutputFormat = normalizeImageDefaultFormat(fallbackText(req.OutputFormat, model.DefaultFormat))
+	req.Moderation = normalizeImageModeration(req.Moderation)
+	req.Background = normalizeImageBackground(req.Background)
+
+	generationID := "img_" + uid.IDStr()
+	runCtx := context.WithoutCancel(ctx)
+	setting, _ := s.GetImageSetting(runCtx)
+	expiresAt := time.Now().AddDate(0, 0, setting.RetentionDays)
+	imageURLs := make([]string, 0, len(req.Images))
+	for i, rawImage := range req.Images {
+		rawImage = strings.TrimSpace(rawImage)
+		if rawImage == "" {
+			continue
+		}
+		var (
+			data []byte
+			ext  string
+			err  error
+		)
+		if strings.HasPrefix(strings.ToLower(rawImage), "http://") || strings.HasPrefix(strings.ToLower(rawImage), "https://") {
+			data, ext, err = downloadImage(runCtx, rawImage)
+		} else {
+			data, ext, err = decodeImageData(rawImage)
+		}
+		if err != nil {
+			log.Errorf("ai agent image decode failed generation_id=%s index=%d error=%v", generationID, i, err)
+			return nil, errors.BadRequest(fmt.Sprintf("invalid image data: %s", err.Error()))
+		}
+		url, err := s.saveGeneratedImage(userID, generationID, i, ext, data)
+		if err != nil {
+			log.Errorf("ai agent image save file failed generation_id=%s index=%d ext=%s bytes=%d error=%v", generationID, i, ext, len(data), err)
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
+		imageURLs = append(imageURLs, url)
+	}
+	if len(imageURLs) == 0 {
+		return nil, errors.BadRequest("images are required")
+	}
+
+	rawURLs, _ := json.Marshal(imageURLs)
+	referenceImagesJSON, _ := json.Marshal(req.ReferenceImages)
+	record := &entity.AIImageGeneration{
+		GenerationID:    generationID,
+		UserID:          userID,
+		SiteModelID:     model.SiteModelID,
+		ProviderID:      provider.ID,
+		ProviderName:    provider.Name,
+		ProviderModelID: model.ProviderModelID,
+		Prompt:          req.Prompt,
+		NegativePrompt:  req.NegativePrompt,
+		AspectRatio:     req.AspectRatio,
+		Size:            req.Size,
+		Style:           req.Style,
+		Quality:         req.Quality,
+		OutputFormat:    req.OutputFormat,
+		Compression:     req.Compression,
+		Moderation:      req.Moderation,
+		Background:      req.Background,
+		ReferenceImages: string(referenceImagesJSON),
+		MaskImage:       req.MaskImage,
+		APIMode:         "responses",
+		ResponseID:      req.ResponseID,
+		ResponseOutput:  req.ResponseOutput,
+		Count:           len(imageURLs),
+		ImageURLs:       string(rawURLs),
+		Status:          "completed",
+		ExpiresAt:       expiresAt,
+	}
+	if err := s.repo.CreateImageGeneration(runCtx, record); err != nil {
+		log.Errorf("ai agent image generation record failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	log.Infof("ai agent image generation saved generation_id=%s user_id=%s image_count=%d", generationID, userID, len(imageURLs))
 	return &schema.AIImageGenerateResp{
 		GenerationID: generationID,
 		Size:         req.Size,
@@ -1291,6 +1929,102 @@ func (s *aiChatConfigService) ListUserImageGenerations(ctx context.Context, user
 		resp = append(resp, s.formatImageGeneration(record))
 	}
 	return resp, nil
+}
+
+func (s *aiChatConfigService) DeleteUserImageGeneration(ctx context.Context, userID, generationID string) error {
+	if err := s.ensureImageTables(ctx); err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	userID = strings.TrimSpace(userID)
+	generationID = strings.TrimSpace(generationID)
+	if userID == "" {
+		return errors.Unauthorized(reason.UnauthorizedError)
+	}
+	if generationID == "" {
+		return errors.BadRequest("generation_id is required")
+	}
+	if err := s.repo.DeleteUserImageGeneration(ctx, userID, generationID); err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	return nil
+}
+
+func (s *aiChatConfigService) ListUserImageAgentConversations(ctx context.Context, userID string) ([]*schema.AIImageAgentConversationResp, error) {
+	if err := s.ensureImageTables(ctx); err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, errors.Unauthorized(reason.UnauthorizedError)
+	}
+	records, err := s.repo.ListUserImageAgentConversations(ctx, userID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	resp := make([]*schema.AIImageAgentConversationResp, 0, len(records))
+	for _, record := range records {
+		resp = append(resp, s.formatImageAgentConversation(record))
+	}
+	return resp, nil
+}
+
+func (s *aiChatConfigService) SaveUserImageAgentConversation(ctx context.Context, userID string, req *schema.AIImageAgentConversationSaveReq) (*schema.AIImageAgentConversationResp, error) {
+	if err := s.ensureImageTables(ctx); err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, errors.Unauthorized(reason.UnauthorizedError)
+	}
+	conversationID := strings.TrimSpace(req.ConversationID)
+	if conversationID == "" {
+		return nil, errors.BadRequest("conversation_id is required")
+	}
+	payload := strings.TrimSpace(req.Payload)
+	if payload == "" || !json.Valid([]byte(payload)) {
+		return nil, errors.BadRequest("payload must be valid JSON")
+	}
+	title := strings.TrimSpace(req.Title)
+	titleRunes := []rune(title)
+	if len(titleRunes) > 255 {
+		title = string(titleRunes[:255])
+	}
+	record := &entity.AIImageAgentConversation{
+		ConversationID: conversationID,
+		UserID:         userID,
+		Title:          title,
+		Payload:        payload,
+	}
+	if err := s.repo.SaveUserImageAgentConversation(ctx, record); err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	records, err := s.repo.ListUserImageAgentConversations(ctx, userID)
+	if err == nil {
+		for _, item := range records {
+			if item.ConversationID == conversationID {
+				return s.formatImageAgentConversation(item), nil
+			}
+		}
+	}
+	return s.formatImageAgentConversation(record), nil
+}
+
+func (s *aiChatConfigService) DeleteUserImageAgentConversation(ctx context.Context, userID, conversationID string) error {
+	if err := s.ensureImageTables(ctx); err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	userID = strings.TrimSpace(userID)
+	conversationID = strings.TrimSpace(conversationID)
+	if userID == "" {
+		return errors.Unauthorized(reason.UnauthorizedError)
+	}
+	if conversationID == "" {
+		return errors.BadRequest("conversation_id is required")
+	}
+	if err := s.repo.DeleteUserImageAgentConversation(ctx, userID, conversationID); err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	return nil
 }
 
 func (s *aiChatConfigService) GetUserImageFilePath(ctx context.Context, userID, ownerID, filename string) (string, error) {
@@ -1871,19 +2605,29 @@ func (s *aiChatConfigService) formatImageModel(ctx context.Context, model *entit
 	if provider, exist, _ := s.repo.GetImageProvider(ctx, model.ProviderID); exist {
 		providerName = provider.Name
 	}
+	upstreams := s.formatImageModelUpstreams(ctx, model)
 	return &schema.AIImageModelResp{
 		ID:              model.ID,
 		ProviderID:      model.ProviderID,
 		ProviderName:    providerName,
 		SiteModelID:     model.SiteModelID,
 		ProviderModelID: model.ProviderModelID,
+		AgentModelID:    getImageAgentModelID(model),
 		DisplayName:     fallbackText(model.DisplayName, model.SiteModelID),
 		Description:     model.Description,
 		DefaultSize:     model.DefaultSize,
+		APIMode:         normalizeImageAPIMode(model.APIMode),
+		SupportsEdits:   model.SupportsEdits,
+		SupportsRefs:    model.SupportsRefs,
+		SupportsStream:  model.SupportsStream,
+		DefaultQuality:  normalizeImageDefaultQuality(model.DefaultQuality),
+		DefaultFormat:   normalizeImageDefaultFormat(model.DefaultFormat),
+		ExtraConfig:     model.ExtraConfig,
 		Enabled:         model.Enabled,
 		SortOrder:       model.SortOrder,
 		CreatedAt:       model.CreatedAt.Unix(),
 		UpdatedAt:       model.UpdatedAt.Unix(),
+		Upstreams:       upstreams,
 	}
 }
 
@@ -1898,6 +2642,8 @@ func (s *aiChatConfigService) formatImageSetting(setting *entity.AIImageSetting)
 func (s *aiChatConfigService) formatImageGeneration(record *entity.AIImageGeneration) *schema.AIImageGenerationResp {
 	imageURLs := make([]string, 0)
 	_ = json.Unmarshal([]byte(record.ImageURLs), &imageURLs)
+	referenceImages := make([]string, 0)
+	_ = json.Unmarshal([]byte(record.ReferenceImages), &referenceImages)
 	return &schema.AIImageGenerationResp{
 		ID:              record.ID,
 		GenerationID:    record.GenerationID,
@@ -1912,6 +2658,15 @@ func (s *aiChatConfigService) formatImageGeneration(record *entity.AIImageGenera
 		Size:            record.Size,
 		Style:           record.Style,
 		Quality:         record.Quality,
+		OutputFormat:    record.OutputFormat,
+		Compression:     record.Compression,
+		Moderation:      record.Moderation,
+		Background:      record.Background,
+		ReferenceImages: referenceImages,
+		MaskImage:       record.MaskImage,
+		APIMode:         record.APIMode,
+		ResponseID:      record.ResponseID,
+		ResponseOutput:  record.ResponseOutput,
 		Count:           record.Count,
 		ImageURLs:       imageURLs,
 		Status:          record.Status,
@@ -1919,6 +2674,17 @@ func (s *aiChatConfigService) formatImageGeneration(record *entity.AIImageGenera
 		ExpiresAt:       unixOrZero(record.ExpiresAt),
 		CreatedAt:       unixOrZero(record.CreatedAt),
 		UpdatedAt:       unixOrZero(record.UpdatedAt),
+	}
+}
+
+func (s *aiChatConfigService) formatImageAgentConversation(record *entity.AIImageAgentConversation) *schema.AIImageAgentConversationResp {
+	return &schema.AIImageAgentConversationResp{
+		ID:             record.ID,
+		ConversationID: record.ConversationID,
+		Title:          record.Title,
+		Payload:        record.Payload,
+		CreatedAt:      unixOrZero(record.CreatedAt),
+		UpdatedAt:      unixOrZero(record.UpdatedAt),
 	}
 }
 
@@ -2040,7 +2806,33 @@ func (s *aiChatConfigService) callAndSaveImages(
 	if req.Quality != "" {
 		payload["quality"] = req.Quality
 	}
+	if req.OutputFormat != "" {
+		payload["output_format"] = req.OutputFormat
+	}
+	if req.OutputFormat != "png" && req.Compression > 0 {
+		payload["output_compression"] = max(0, min(100, req.Compression))
+	}
+	if req.Moderation != "" {
+		payload["moderation"] = req.Moderation
+	}
+	if req.Background != "" && req.Background != "auto" {
+		payload["background"] = req.Background
+	}
+	if normalizeImageAPIMode(model.APIMode) == "responses" {
+		preparedImages, err := prepareReferenceImages(ctx, req.ReferenceImages)
+		if err != nil {
+			log.Errorf("ai image reference prepare failed generation_id=%s error=%v", generationID, err)
+			return nil, err
+		}
+		log.Infof("ai image upstream route generation_id=%s api_mode=responses references=%d", generationID, len(preparedImages))
+		return s.callResponsesImageAPI(
+			ctx, resty.New().SetRetryCount(1), baseURL, provider, model, generationID, userID, req, prompt, preparedImages,
+		)
+	}
 	if len(req.ReferenceImages) > 0 {
+		if !model.SupportsRefs {
+			return nil, fmt.Errorf("image model does not support reference images")
+		}
 		log.Infof("ai image preparing references generation_id=%s raw_reference_count=%d", generationID, len(req.ReferenceImages))
 		preparedImages, err := prepareReferenceImages(ctx, req.ReferenceImages)
 		if err != nil {
@@ -2099,30 +2891,36 @@ func (s *aiChatConfigService) callAndSaveImagesWithReferences(
 	client := resty.New().SetRetryCount(1)
 	var lastErr error
 
-	if imageURLs, err := s.callImageEditsAPI(ctx, client, baseURL, provider, generationID, userID, req, prompt, basePayload, referenceImages, false); err == nil {
-		log.Infof("ai image reference generation succeeded generation_id=%s strategy=images_edits field=image image_count=%d", generationID, len(imageURLs))
-		return imageURLs, nil
-	} else {
-		log.Warnf("ai image reference generation attempt failed generation_id=%s strategy=images_edits field=image error=%v", generationID, err)
-		lastErr = err
-	}
-
-	if len(referenceImages) > 1 {
-		if imageURLs, err := s.callImageEditsAPI(ctx, client, baseURL, provider, generationID, userID, req, prompt, basePayload, referenceImages, true); err == nil {
-			log.Infof("ai image reference generation succeeded generation_id=%s strategy=images_edits field=image_array image_count=%d", generationID, len(imageURLs))
+	if model.SupportsEdits {
+		if imageURLs, err := s.callImageEditsAPI(ctx, client, baseURL, provider, generationID, userID, req, prompt, basePayload, referenceImages, false); err == nil {
+			log.Infof("ai image reference generation succeeded generation_id=%s strategy=images_edits field=image image_count=%d", generationID, len(imageURLs))
 			return imageURLs, nil
 		} else {
-			log.Warnf("ai image reference generation attempt failed generation_id=%s strategy=images_edits field=image_array error=%v", generationID, err)
+			log.Warnf("ai image reference generation attempt failed generation_id=%s strategy=images_edits field=image error=%v", generationID, err)
 			lastErr = err
 		}
+
+		if len(referenceImages) > 1 {
+			if imageURLs, err := s.callImageEditsAPI(ctx, client, baseURL, provider, generationID, userID, req, prompt, basePayload, referenceImages, true); err == nil {
+				log.Infof("ai image reference generation succeeded generation_id=%s strategy=images_edits field=image_array image_count=%d", generationID, len(imageURLs))
+				return imageURLs, nil
+			} else {
+				log.Warnf("ai image reference generation attempt failed generation_id=%s strategy=images_edits field=image_array error=%v", generationID, err)
+				lastErr = err
+			}
+		}
+	} else {
+		lastErr = fmt.Errorf("image model does not support edits")
 	}
 
-	if imageURLs, err := s.callResponsesImageAPI(ctx, client, baseURL, provider, model, generationID, userID, req, prompt, referenceImages); err == nil {
-		log.Infof("ai image reference generation succeeded generation_id=%s strategy=responses image_count=%d", generationID, len(imageURLs))
-		return imageURLs, nil
-	} else {
-		log.Warnf("ai image reference generation attempt failed generation_id=%s strategy=responses error=%v", generationID, err)
-		lastErr = err
+	if model.SupportsRefs || normalizeImageAPIMode(model.APIMode) == "responses" {
+		if imageURLs, err := s.callResponsesImageAPI(ctx, client, baseURL, provider, model, generationID, userID, req, prompt, referenceImages); err == nil {
+			log.Infof("ai image reference generation succeeded generation_id=%s strategy=responses image_count=%d", generationID, len(imageURLs))
+			return imageURLs, nil
+		} else {
+			log.Warnf("ai image reference generation attempt failed generation_id=%s strategy=responses error=%v", generationID, err)
+			lastErr = err
+		}
 	}
 
 	return nil, fmt.Errorf("reference image generation failed: %w", lastErr)
@@ -2156,9 +2954,23 @@ func (s *aiChatConfigService) callResponsesImageAPI(
 	if req.Quality != "" {
 		tool["quality"] = req.Quality
 	}
+	if req.OutputFormat != "" {
+		tool["output_format"] = req.OutputFormat
+	}
+	if req.OutputFormat != "png" && req.Compression > 0 {
+		tool["output_compression"] = max(0, min(100, req.Compression))
+	}
+	if req.Moderation != "" {
+		tool["moderation"] = req.Moderation
+	}
+	if req.Background != "" && req.Background != "auto" {
+		tool["background"] = req.Background
+	}
+	responsesModelID := getImageResponsesModelID(model)
 	body := map[string]any{
-		"model":  "gpt-5.5",
-		"stream": false,
+		"model":       responsesModelID,
+		"stream":      false,
+		"tool_choice": map[string]any{"type": "image_generation"},
 		"input": []map[string]any{
 			{
 				"role":    "user",
@@ -2167,21 +2979,38 @@ func (s *aiChatConfigService) callResponsesImageAPI(
 		},
 		"tools": []map[string]any{tool},
 	}
-	resp, err := client.R().
-		SetContext(ctx).
-		SetHeader("Authorization", fmt.Sprintf("Bearer %s", provider.APIKey)).
-		SetHeader("Content-Type", "application/json").
-		SetBody(body).
-		Post(baseURL + "/responses")
-	if err != nil {
-		log.Errorf("ai image upstream request failed generation_id=%s endpoint=%s model=%s references=%d error=%v", generationID, "/responses", "gpt-5.5", len(referenceImages), err)
-		return nil, err
-	}
-	if !resp.IsSuccess() {
-		log.Errorf("ai image upstream non-success generation_id=%s endpoint=%s model=%s references=%d status=%d body=%s", generationID, "/responses", "gpt-5.5", len(referenceImages), resp.StatusCode(), responseSnippet(resp.Body()))
+	const maxAttempts = 4
+	var resp *resty.Response
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		currentResp, err := client.R().
+			SetContext(ctx).
+			SetHeader("Authorization", fmt.Sprintf("Bearer %s", provider.APIKey)).
+			SetHeader("Content-Type", "application/json").
+			SetBody(body).
+			Post(baseURL + "/responses")
+		if err != nil {
+			log.Errorf("ai image upstream request failed generation_id=%s endpoint=%s model=%s references=%d attempt=%d error=%v", generationID, "/responses", responsesModelID, len(referenceImages), attempt, err)
+			return nil, err
+		}
+		resp = currentResp
+		if resp.IsSuccess() {
+			break
+		}
+		if attempt < maxAttempts && shouldRetryImageResponsesError(resp.StatusCode(), resp.Body()) {
+			delay := imageResponsesRetryDelay(resp.Body(), attempt)
+			log.Warnf("ai image upstream retry generation_id=%s endpoint=%s model=%s references=%d attempt=%d status=%d delay=%s body=%s", generationID, "/responses", responsesModelID, len(referenceImages), attempt, resp.StatusCode(), delay, responseSnippet(resp.Body()))
+			if err := sleepWithContext(ctx, delay); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		log.Errorf("ai image upstream non-success generation_id=%s endpoint=%s model=%s references=%d status=%d body=%s", generationID, "/responses", responsesModelID, len(referenceImages), resp.StatusCode(), responseSnippet(resp.Body()))
 		return nil, fmt.Errorf("responses status %d: %s", resp.StatusCode(), resp.String())
 	}
-	log.Infof("ai image upstream success generation_id=%s endpoint=%s model=%s references=%d status=%d bytes=%d", generationID, "/responses", "gpt-5.5", len(referenceImages), resp.StatusCode(), len(resp.Body()))
+	if resp == nil {
+		return nil, fmt.Errorf("responses request did not return response")
+	}
+	log.Infof("ai image upstream success generation_id=%s endpoint=%s model=%s references=%d status=%d bytes=%d", generationID, "/responses", responsesModelID, len(referenceImages), resp.StatusCode(), len(resp.Body()))
 	return s.saveImageAPIResponse(ctx, userID, generationID, resp.Body())
 }
 
@@ -2213,6 +3042,15 @@ func (s *aiChatConfigService) callImageEditsAPI(
 	}
 	if req.Quality != "" {
 		formData["quality"] = req.Quality
+	}
+	if req.OutputFormat != "" {
+		formData["output_format"] = req.OutputFormat
+	}
+	if req.OutputFormat != "png" && req.Compression > 0 {
+		formData["output_compression"] = fmt.Sprint(max(0, min(100, req.Compression)))
+	}
+	if req.Background != "" && req.Background != "auto" {
+		formData["background"] = req.Background
 	}
 	request := client.R().
 		SetContext(ctx).
@@ -2839,21 +3677,313 @@ func normalizeOpenAIImageQuality(value string) string {
 	}
 }
 
+func normalizeImageAPIMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "responses":
+		return "responses"
+	default:
+		return "images"
+	}
+}
+
+func normalizeImageDefaultQuality(value string) string {
+	quality := normalizeOpenAIImageQuality(value)
+	if quality == "" {
+		return "auto"
+	}
+	return quality
+}
+
+func normalizeImageDefaultFormat(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "jpeg", "jpg":
+		return "jpeg"
+	case "webp":
+		return "webp"
+	default:
+		return "png"
+	}
+}
+
+func normalizeImageModeration(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "low":
+		return "low"
+	default:
+		return "auto"
+	}
+}
+
+func normalizeImageBackground(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "transparent":
+		return "transparent"
+	case "opaque":
+		return "opaque"
+	default:
+		return "auto"
+	}
+}
+
+type imageModelUpstreamConfig struct {
+	ProviderID       int    `json:"provider_id"`
+	ProviderModelID  string `json:"provider_model_id"`
+	AgentModelID     string `json:"agent_model_id,omitempty"`
+	ResponsesModelID string `json:"responses_model_id,omitempty"`
+	Weight           int    `json:"weight,omitempty"`
+	Enabled          *bool  `json:"enabled,omitempty"`
+}
+
+type selectedImageModelUpstream struct {
+	Provider *entity.AIImageProvider
+	Model    *entity.AIImageModel
+	Config   imageModelUpstreamConfig
+}
+
+func (s *aiChatConfigService) mergeImageModelExtraConfig(ctx context.Context, raw, agentModelID string, upstreamReqs []schema.AIImageModelUpstreamReq) (string, error) {
+	raw = strings.TrimSpace(raw)
+	extra := map[string]any{}
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &extra); err != nil {
+			return "", errors.BadRequest("extra_config must be a valid JSON object")
+		}
+	}
+	if value := strings.TrimSpace(agentModelID); value != "" {
+		extra["agent_model_id"] = value
+	} else {
+		delete(extra, "agent_model_id")
+	}
+	if upstreamReqs != nil {
+		upstreams, err := s.normalizeImageModelUpstreamReqs(ctx, upstreamReqs)
+		if err != nil {
+			return "", err
+		}
+		if len(upstreams) > 0 {
+			extra["upstreams"] = upstreams
+		} else {
+			delete(extra, "upstreams")
+		}
+	}
+	if len(extra) == 0 {
+		return "", nil
+	}
+	body, err := json.Marshal(extra)
+	if err != nil {
+		return "", errors.BadRequest(err.Error())
+	}
+	return string(body), nil
+}
+
+func (s *aiChatConfigService) normalizeImageModelUpstreamReqs(ctx context.Context, reqs []schema.AIImageModelUpstreamReq) ([]imageModelUpstreamConfig, error) {
+	upstreams := make([]imageModelUpstreamConfig, 0, len(reqs))
+	for _, req := range reqs {
+		providerID := req.ProviderID
+		providerModelID := strings.TrimSpace(req.ProviderModelID)
+		if providerID <= 0 && providerModelID == "" {
+			continue
+		}
+		if providerID <= 0 {
+			return nil, errors.BadRequest("upstream provider_id is required")
+		}
+		if providerModelID == "" {
+			return nil, errors.BadRequest("upstream provider_model_id is required")
+		}
+		if _, exist, err := s.repo.GetImageProvider(ctx, providerID); err != nil {
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		} else if !exist {
+			return nil, errors.BadRequest("upstream provider is not available")
+		}
+		enabled := req.Enabled
+		weight := req.Weight
+		if weight <= 0 {
+			weight = 1
+		}
+		upstreams = append(upstreams, imageModelUpstreamConfig{
+			ProviderID:       providerID,
+			ProviderModelID:  providerModelID,
+			AgentModelID:     strings.TrimSpace(req.AgentModelID),
+			ResponsesModelID: strings.TrimSpace(req.ResponsesModelID),
+			Weight:           weight,
+			Enabled:          &enabled,
+		})
+	}
+	return upstreams, nil
+}
+
+func getImageModelUpstreamConfigs(model *entity.AIImageModel) []imageModelUpstreamConfig {
+	if strings.TrimSpace(model.ExtraConfig) == "" {
+		return nil
+	}
+	var cfg struct {
+		Upstreams []imageModelUpstreamConfig `json:"upstreams"`
+	}
+	if err := json.Unmarshal([]byte(model.ExtraConfig), &cfg); err != nil {
+		return nil
+	}
+	return cfg.Upstreams
+}
+
+func imageModelUpstreamEnabled(upstream imageModelUpstreamConfig) bool {
+	return upstream.Enabled == nil || *upstream.Enabled
+}
+
+func (s *aiChatConfigService) selectImageModelUpstream(ctx context.Context, model *entity.AIImageModel) (*selectedImageModelUpstream, error) {
+	configs := getImageModelUpstreamConfigs(model)
+	if len(configs) == 0 {
+		configs = []imageModelUpstreamConfig{{
+			ProviderID:      model.ProviderID,
+			ProviderModelID: model.ProviderModelID,
+			Weight:          1,
+		}}
+	}
+
+	candidates := make([]*selectedImageModelUpstream, 0, len(configs))
+	totalWeight := 0
+	for _, cfg := range configs {
+		cfg.ProviderModelID = strings.TrimSpace(cfg.ProviderModelID)
+		if cfg.ProviderID <= 0 || cfg.ProviderModelID == "" || !imageModelUpstreamEnabled(cfg) {
+			continue
+		}
+		provider, exist, err := s.repo.GetImageProvider(ctx, cfg.ProviderID)
+		if err != nil {
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
+		if !exist || !provider.Enabled ||
+			strings.TrimSpace(provider.BaseURL) == "" ||
+			strings.TrimSpace(provider.APIKey) == "" {
+			continue
+		}
+		weight := cfg.Weight
+		if weight <= 0 {
+			weight = 1
+			cfg.Weight = weight
+		}
+		upstreamModel := imageModelWithUpstream(model, cfg)
+		candidates = append(candidates, &selectedImageModelUpstream{
+			Provider: provider,
+			Model:    upstreamModel,
+			Config:   cfg,
+		})
+		totalWeight += weight
+	}
+	if len(candidates) == 0 {
+		return nil, errors.BadRequest("image provider is not available")
+	}
+	if len(candidates) == 1 || totalWeight <= 1 {
+		return candidates[0], nil
+	}
+	index, err := rand.Int(rand.Reader, big.NewInt(int64(totalWeight)))
+	if err != nil {
+		return candidates[0], nil
+	}
+	pick := int(index.Int64())
+	for _, candidate := range candidates {
+		pick -= candidate.Config.Weight
+		if pick < 0 {
+			return candidate, nil
+		}
+	}
+	return candidates[len(candidates)-1], nil
+}
+
+func imageModelWithUpstream(model *entity.AIImageModel, upstream imageModelUpstreamConfig) *entity.AIImageModel {
+	copied := *model
+	copied.ProviderID = upstream.ProviderID
+	copied.ProviderModelID = upstream.ProviderModelID
+	if strings.TrimSpace(upstream.AgentModelID) != "" || strings.TrimSpace(upstream.ResponsesModelID) != "" {
+		copied.ExtraConfig = imageModelExtraConfigWithOverrides(model.ExtraConfig, upstream.AgentModelID, upstream.ResponsesModelID)
+	}
+	return &copied
+}
+
+func imageModelExtraConfigWithOverrides(raw, agentModelID, responsesModelID string) string {
+	extra := map[string]any{}
+	if strings.TrimSpace(raw) != "" {
+		_ = json.Unmarshal([]byte(raw), &extra)
+	}
+	if value := strings.TrimSpace(agentModelID); value != "" {
+		extra["agent_model_id"] = value
+	}
+	if value := strings.TrimSpace(responsesModelID); value != "" {
+		extra["responses_model_id"] = value
+	}
+	body, err := json.Marshal(extra)
+	if err != nil {
+		return raw
+	}
+	return string(body)
+}
+
+func (s *aiChatConfigService) formatImageModelUpstreams(ctx context.Context, model *entity.AIImageModel) []schema.AIImageModelUpstreamResp {
+	configs := getImageModelUpstreamConfigs(model)
+	resp := make([]schema.AIImageModelUpstreamResp, 0, len(configs))
+	for _, cfg := range configs {
+		providerName := ""
+		if provider, exist, _ := s.repo.GetImageProvider(ctx, cfg.ProviderID); exist {
+			providerName = provider.Name
+		}
+		weight := cfg.Weight
+		if weight <= 0 {
+			weight = 1
+		}
+		resp = append(resp, schema.AIImageModelUpstreamResp{
+			ProviderID:       cfg.ProviderID,
+			ProviderName:     providerName,
+			ProviderModelID:  strings.TrimSpace(cfg.ProviderModelID),
+			AgentModelID:     strings.TrimSpace(cfg.AgentModelID),
+			ResponsesModelID: strings.TrimSpace(cfg.ResponsesModelID),
+			Weight:           weight,
+			Enabled:          imageModelUpstreamEnabled(cfg),
+		})
+	}
+	return resp
+}
+
+func getImageResponsesModelID(model *entity.AIImageModel) string {
+	type responsesConfig struct {
+		ResponsesModelID string `json:"responses_model_id"`
+	}
+	if strings.TrimSpace(model.ExtraConfig) != "" {
+		var cfg responsesConfig
+		if err := json.Unmarshal([]byte(model.ExtraConfig), &cfg); err == nil {
+			if value := strings.TrimSpace(cfg.ResponsesModelID); value != "" {
+				return value
+			}
+		}
+	}
+	if agentModelID := getImageAgentModelID(model); agentModelID != "" {
+		return agentModelID
+	}
+	return strings.TrimSpace(model.ProviderModelID)
+}
+
+func getImageAgentModelID(model *entity.AIImageModel) string {
+	type agentConfig struct {
+		AgentModelID string `json:"agent_model_id"`
+	}
+	if strings.TrimSpace(model.ExtraConfig) != "" {
+		var cfg agentConfig
+		if err := json.Unmarshal([]byte(model.ExtraConfig), &cfg); err == nil {
+			return strings.TrimSpace(cfg.AgentModelID)
+		}
+	}
+	return ""
+}
+
 func shouldRequestImageResponseFormat(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
 	return strings.HasPrefix(model, "dall-e-")
 }
 
 func normalizeOpenAIImageSize(size, aspectRatio string) string {
-	switch strings.ToLower(strings.TrimSpace(size)) {
+	normalizedSize := strings.ToLower(strings.TrimSpace(size))
+	switch normalizedSize {
 	case "auto":
 		return "auto"
-	case "1024x1024":
-		return "1024x1024"
-	case "1536x1024":
-		return "1536x1024"
-	case "1024x1536":
-		return "1024x1536"
+	}
+	if width, height, ok := parseImageSize(normalizedSize); ok {
+		width, height = normalizeImageDimensions(width, height)
+		return fmt.Sprintf("%dx%d", width, height)
 	}
 	switch strings.ToLower(strings.TrimSpace(aspectRatio)) {
 	case "auto":
@@ -2870,16 +4000,142 @@ func normalizeOpenAIImageSize(size, aspectRatio string) string {
 }
 
 func imageAspectRatio(size string) string {
-	switch strings.ToLower(strings.TrimSpace(size)) {
+	normalizedSize := strings.ToLower(strings.TrimSpace(size))
+	switch normalizedSize {
 	case "auto":
 		return "auto"
 	case "1536x1024":
 		return "3:2"
 	case "1024x1536":
 		return "2:3"
-	default:
+	}
+	width, height, ok := parseImageSize(normalizedSize)
+	if !ok || width <= 0 || height <= 0 {
 		return "1:1"
 	}
+	return formatImageAspectRatio(width, height)
+}
+
+func parseImageSize(size string) (int, int, bool) {
+	parts := strings.FieldsFunc(size, func(r rune) bool {
+		return r == 'x' || r == 'X' || r == '×'
+	})
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	width, widthErr := parsePositiveInt(parts[0])
+	height, heightErr := parsePositiveInt(parts[1])
+	if widthErr != nil || heightErr != nil {
+		return 0, 0, false
+	}
+	return width, height, true
+}
+
+func parsePositiveInt(value string) (int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, fmt.Errorf("empty number")
+	}
+	result := 0
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("invalid number")
+		}
+		result = result*10 + int(r-'0')
+	}
+	if result <= 0 {
+		return 0, fmt.Errorf("non-positive number")
+	}
+	return result, nil
+}
+
+func normalizeImageDimensions(width, height int) (int, int) {
+	const (
+		sizeMultiple   = 16
+		maxEdge        = 3840
+		maxAspectRatio = 3
+		minPixels      = 655360
+		maxPixels      = 8294400
+		iterationLimit = 4
+	)
+	normalizedWidth := roundToMultiple(width, sizeMultiple)
+	normalizedHeight := roundToMultiple(height, sizeMultiple)
+
+	scaleToFit := func(scale float64) {
+		normalizedWidth = floorToMultiple(float64(normalizedWidth)*scale, sizeMultiple)
+		normalizedHeight = floorToMultiple(float64(normalizedHeight)*scale, sizeMultiple)
+	}
+	scaleToFill := func(scale float64) {
+		normalizedWidth = ceilToMultiple(float64(normalizedWidth)*scale, sizeMultiple)
+		normalizedHeight = ceilToMultiple(float64(normalizedHeight)*scale, sizeMultiple)
+	}
+
+	for i := 0; i < iterationLimit; i++ {
+		currentMaxEdge := maxInt(normalizedWidth, normalizedHeight)
+		if currentMaxEdge > maxEdge {
+			scaleToFit(float64(maxEdge) / float64(currentMaxEdge))
+		}
+
+		if float64(normalizedWidth)/float64(normalizedHeight) > maxAspectRatio {
+			normalizedWidth = floorToMultiple(float64(normalizedHeight)*maxAspectRatio, sizeMultiple)
+		} else if float64(normalizedHeight)/float64(normalizedWidth) > maxAspectRatio {
+			normalizedHeight = floorToMultiple(float64(normalizedWidth)*maxAspectRatio, sizeMultiple)
+		}
+
+		pixels := normalizedWidth * normalizedHeight
+		if pixels > maxPixels {
+			scaleToFit(math.Sqrt(float64(maxPixels) / float64(pixels)))
+		} else if pixels < minPixels {
+			scaleToFill(math.Sqrt(float64(minPixels) / float64(pixels)))
+		}
+	}
+
+	return normalizedWidth, normalizedHeight
+}
+
+func roundToMultiple(value, multiple int) int {
+	rounded := int(math.Round(float64(value)/float64(multiple))) * multiple
+	return maxInt(multiple, rounded)
+}
+
+func floorToMultiple(value float64, multiple int) int {
+	rounded := int(math.Floor(value/float64(multiple))) * multiple
+	return maxInt(multiple, rounded)
+}
+
+func ceilToMultiple(value float64, multiple int) int {
+	rounded := int(math.Ceil(value/float64(multiple))) * multiple
+	return maxInt(multiple, rounded)
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func formatImageAspectRatio(width, height int) string {
+	divisor := gcdInt(width, height)
+	simplifiedWidth := width / divisor
+	simplifiedHeight := height / divisor
+	return fmt.Sprintf("%d:%d", simplifiedWidth, simplifiedHeight)
+}
+
+func gcdInt(a, b int) int {
+	if a < 0 {
+		a = -a
+	}
+	if b < 0 {
+		b = -b
+	}
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a == 0 {
+		return 1
+	}
+	return a
 }
 
 func validateVideoSeconds(seconds int) error {
@@ -3027,6 +4283,45 @@ func responseSnippet(body []byte) string {
 		return text[:limit] + "...(truncated)"
 	}
 	return text
+}
+
+func shouldRetryImageResponsesError(statusCode int, body []byte) bool {
+	if statusCode != http.StatusTooManyRequests && statusCode != http.StatusBadGateway && statusCode != http.StatusServiceUnavailable {
+		return false
+	}
+	text := strings.ToLower(string(body))
+	return strings.Contains(text, "rate limit") ||
+		strings.Contains(text, "try again") ||
+		strings.Contains(text, "upstream_error") ||
+		strings.Contains(text, "upstream request failed")
+}
+
+func imageResponsesRetryDelay(body []byte, attempt int) time.Duration {
+	text := string(body)
+	if matches := retryAfterPattern.FindStringSubmatch(text); len(matches) == 2 {
+		if value, err := parsePositiveInt(matches[1]); err == nil {
+			return time.Duration(maxInt(value, 50)) * time.Millisecond
+		}
+	}
+	switch attempt {
+	case 1:
+		return 200 * time.Millisecond
+	case 2:
+		return 600 * time.Millisecond
+	default:
+		return 1200 * time.Millisecond
+	}
+}
+
+func sleepWithContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func decodeImageData(value string) ([]byte, string, error) {

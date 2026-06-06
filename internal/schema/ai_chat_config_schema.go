@@ -245,6 +245,31 @@ type AIChatUsageLogReq struct {
 	ConsumePoints    float64 `json:"consume_points"`
 }
 
+type AIAgentResponsesReq struct {
+	ImageModel        string `json:"model" validate:"required"`
+	Instructions      string `json:"instructions"`
+	Input             any    `json:"input" validate:"required"`
+	Tools             any    `json:"tools"`
+	ToolChoice        any    `json:"tool_choice"`
+	Stream            bool   `json:"stream"`
+	MaxOutputTokens   int    `json:"max_output_tokens"`
+	ReasoningEffort   string `json:"reasoning_effort"`
+	ConversationID    string `json:"conversation_id"`
+	ChatCompletionID  string `json:"chat_completion_id"`
+	DisableUsageLog   bool   `json:"disable_usage_log"`
+	DisablePointCheck bool   `json:"disable_point_check"`
+}
+
+type AIImageAgentUpstreamResp struct {
+	ImageModelID    string
+	ProviderID      int
+	ProviderName    string
+	ProviderModelID string
+	BaseURL         string
+	APIKey          string
+	SupportsStream  bool
+}
+
 type AIImageProviderReq struct {
 	Name    string `json:"name" validate:"required"`
 	BaseURL string `json:"base_url" validate:"required"`
@@ -264,30 +289,67 @@ type AIImageProviderResp struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type AIImageModelUpstreamReq struct {
+	ProviderID       int    `json:"provider_id"`
+	ProviderModelID  string `json:"provider_model_id"`
+	AgentModelID     string `json:"agent_model_id"`
+	ResponsesModelID string `json:"responses_model_id"`
+	Weight           int    `json:"weight"`
+	Enabled          bool   `json:"enabled"`
+}
+
+type AIImageModelUpstreamResp struct {
+	ProviderID       int    `json:"provider_id"`
+	ProviderName     string `json:"provider_name"`
+	ProviderModelID  string `json:"provider_model_id"`
+	AgentModelID     string `json:"agent_model_id"`
+	ResponsesModelID string `json:"responses_model_id"`
+	Weight           int    `json:"weight"`
+	Enabled          bool   `json:"enabled"`
+}
+
 type AIImageModelReq struct {
-	ProviderID      int    `json:"provider_id"`
-	SiteModelID     string `json:"site_model_id" validate:"required"`
-	ProviderModelID string `json:"provider_model_id" validate:"required"`
-	DisplayName     string `json:"display_name"`
-	Description     string `json:"description"`
-	DefaultSize     string `json:"default_size"`
-	Enabled         bool   `json:"enabled"`
-	SortOrder       int    `json:"sort_order"`
+	ProviderID      int                       `json:"provider_id"`
+	SiteModelID     string                    `json:"site_model_id" validate:"required"`
+	ProviderModelID string                    `json:"provider_model_id" validate:"required"`
+	AgentModelID    string                    `json:"agent_model_id"`
+	DisplayName     string                    `json:"display_name"`
+	Description     string                    `json:"description"`
+	DefaultSize     string                    `json:"default_size"`
+	APIMode         string                    `json:"api_mode"`
+	SupportsEdits   bool                      `json:"supports_edits"`
+	SupportsRefs    bool                      `json:"supports_references"`
+	SupportsStream  bool                      `json:"supports_stream"`
+	DefaultQuality  string                    `json:"default_quality"`
+	DefaultFormat   string                    `json:"default_format"`
+	ExtraConfig     string                    `json:"extra_config"`
+	Enabled         bool                      `json:"enabled"`
+	SortOrder       int                       `json:"sort_order"`
+	Upstreams       []AIImageModelUpstreamReq `json:"upstreams"`
 }
 
 type AIImageModelResp struct {
-	ID              int    `json:"id"`
-	ProviderID      int    `json:"provider_id"`
-	ProviderName    string `json:"provider_name"`
-	SiteModelID     string `json:"site_model_id"`
-	ProviderModelID string `json:"provider_model_id"`
-	DisplayName     string `json:"display_name"`
-	Description     string `json:"description"`
-	DefaultSize     string `json:"default_size"`
-	Enabled         bool   `json:"enabled"`
-	SortOrder       int    `json:"sort_order"`
-	CreatedAt       int64  `json:"created_at"`
-	UpdatedAt       int64  `json:"updated_at"`
+	ID              int                        `json:"id"`
+	ProviderID      int                        `json:"provider_id"`
+	ProviderName    string                     `json:"provider_name"`
+	SiteModelID     string                     `json:"site_model_id"`
+	ProviderModelID string                     `json:"provider_model_id"`
+	AgentModelID    string                     `json:"agent_model_id"`
+	DisplayName     string                     `json:"display_name"`
+	Description     string                     `json:"description"`
+	DefaultSize     string                     `json:"default_size"`
+	APIMode         string                     `json:"api_mode"`
+	SupportsEdits   bool                       `json:"supports_edits"`
+	SupportsRefs    bool                       `json:"supports_references"`
+	SupportsStream  bool                       `json:"supports_stream"`
+	DefaultQuality  string                     `json:"default_quality"`
+	DefaultFormat   string                     `json:"default_format"`
+	ExtraConfig     string                     `json:"extra_config"`
+	Enabled         bool                       `json:"enabled"`
+	SortOrder       int                        `json:"sort_order"`
+	CreatedAt       int64                      `json:"created_at"`
+	UpdatedAt       int64                      `json:"updated_at"`
+	Upstreams       []AIImageModelUpstreamResp `json:"upstreams"`
 }
 
 type AIImageSettingReq struct {
@@ -308,8 +370,34 @@ type AIImageGenerateReq struct {
 	Size            string   `json:"size"`
 	Style           string   `json:"style"`
 	Quality         string   `json:"quality"`
+	OutputFormat    string   `json:"output_format"`
+	Compression     int      `json:"output_compression"`
+	Moderation      string   `json:"moderation"`
+	Background      string   `json:"background"`
+	MaskImage       string   `json:"mask_image"`
 	Count           int      `json:"count"`
 	ReferenceImages []string `json:"reference_images"`
+	Stream          bool     `json:"stream"`
+	PartialImages   int      `json:"partial_images"`
+}
+
+type AIImageAgentGenerationSaveReq struct {
+	Prompt          string   `json:"prompt" validate:"required"`
+	NegativePrompt  string   `json:"negative_prompt"`
+	Model           string   `json:"model" validate:"required"`
+	AspectRatio     string   `json:"aspect_ratio"`
+	Size            string   `json:"size"`
+	Style           string   `json:"style"`
+	Quality         string   `json:"quality"`
+	OutputFormat    string   `json:"output_format"`
+	Compression     int      `json:"output_compression"`
+	Moderation      string   `json:"moderation"`
+	Background      string   `json:"background"`
+	MaskImage       string   `json:"mask_image"`
+	ReferenceImages []string `json:"reference_images"`
+	Images          []string `json:"images" validate:"required"`
+	ResponseID      string   `json:"response_id"`
+	ResponseOutput  string   `json:"response_output"`
 }
 
 type AIImageEditReq struct {
@@ -318,6 +406,10 @@ type AIImageEditReq struct {
 	Model    string `json:"model" validate:"required"`
 	Size     string `json:"size"`
 	Quality  string `json:"quality"`
+}
+
+type AIImageGenerationDeleteReq struct {
+	GenerationID string `json:"generation_id" validate:"required"`
 }
 
 type AIImageGenerationResp struct {
@@ -334,6 +426,15 @@ type AIImageGenerationResp struct {
 	Size            string   `json:"size"`
 	Style           string   `json:"style"`
 	Quality         string   `json:"quality"`
+	OutputFormat    string   `json:"output_format"`
+	Compression     int      `json:"output_compression"`
+	Moderation      string   `json:"moderation"`
+	Background      string   `json:"background"`
+	ReferenceImages []string `json:"reference_images"`
+	MaskImage       string   `json:"mask_image"`
+	APIMode         string   `json:"api_mode"`
+	ResponseID      string   `json:"response_id"`
+	ResponseOutput  string   `json:"response_output"`
 	Count           int      `json:"count"`
 	ImageURLs       []string `json:"image_urls"`
 	Status          string   `json:"status"`
@@ -341,6 +442,25 @@ type AIImageGenerationResp struct {
 	ExpiresAt       int64    `json:"expires_at"`
 	CreatedAt       int64    `json:"created_at"`
 	UpdatedAt       int64    `json:"updated_at"`
+}
+
+type AIImageAgentConversationResp struct {
+	ID             int    `json:"id"`
+	ConversationID string `json:"conversation_id"`
+	Title          string `json:"title"`
+	Payload        string `json:"payload"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
+}
+
+type AIImageAgentConversationSaveReq struct {
+	ConversationID string `json:"conversation_id" validate:"required"`
+	Title          string `json:"title"`
+	Payload        string `json:"payload" validate:"required"`
+}
+
+type AIImageAgentConversationDeleteReq struct {
+	ConversationID string `json:"conversation_id" validate:"required"`
 }
 
 type AIImageGenerateResp struct {

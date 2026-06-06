@@ -121,6 +121,7 @@ var migrations = []Migration{
 	NewMigration("v2.1.10", "ensure task square and points", ensureTaskSquareAndPoints, false),
 	NewMigration("v2.1.11", "backfill featured posts", backfillFeaturedPosts, false),
 	NewMigration("v2.1.12", "add ai video generation", addAIVideoGeneration, false),
+	NewMigration("v2.1.13", "ensure ai image model config columns", ensureAIImageModelConfigColumns, false),
 }
 
 func GetMigrations() []Migration {

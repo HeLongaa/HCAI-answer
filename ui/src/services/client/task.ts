@@ -116,7 +116,8 @@ export const assignTask = (params: { id: number; assignee_id: string }) =>
   request.put('/answer/admin/api/task/assign', params);
 
 export const reviewTaskSubmission = (params: {
-  submission_id: number;
+  submission_id?: number;
+  task_id?: number;
   approved: boolean;
   review_note?: string;
 }) => request.put('/answer/admin/api/task/submission/review', params);

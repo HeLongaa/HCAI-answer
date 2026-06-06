@@ -144,17 +144,62 @@ const imageProviderInit = {
   remark: '',
 };
 
+const imageModelUpstreamInit = {
+  client_id: '',
+  provider_id: 0,
+  provider_model_id: '',
+  agent_model_id: '',
+  responses_model_id: '',
+  weight: 1,
+  enabled: true,
+};
+
 const imageModelInit = {
   id: 0,
   provider_id: 0,
   site_model_id: '',
   provider_model_id: '',
+  agent_model_id: '',
   display_name: '',
   description: '',
   default_size: '1024x1024',
+  api_mode: 'images',
+  supports_edits: true,
+  supports_references: true,
+  supports_stream: false,
+  default_quality: 'auto',
+  default_format: 'png',
+  extra_config: '',
   enabled: true,
   sort_order: 0,
+  upstreams: [] as Array<typeof imageModelUpstreamInit>,
 };
+
+type ImageModelUpstreamForm = typeof imageModelUpstreamInit;
+
+const newImageModelUpstream = (): ImageModelUpstreamForm => ({
+  ...imageModelUpstreamInit,
+  client_id:
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`,
+});
+
+const normalizeImageModelUpstreams = (upstreams?: any[]) =>
+  (upstreams || [])
+    .map((upstream, index) => ({
+      client_id: upstream.client_id || `saved-${index}`,
+      provider_id: Number(upstream.provider_id || 0),
+      provider_model_id: upstream.provider_model_id || '',
+      agent_model_id: upstream.agent_model_id || '',
+      responses_model_id: upstream.responses_model_id || '',
+      weight: Math.max(1, Number(upstream.weight || 1)),
+      enabled: upstream.enabled !== false,
+    }))
+    .filter(
+      (upstream) =>
+        upstream.provider_id > 0 || upstream.provider_model_id.trim() !== '',
+    );
 
 const imageSettingInit = {
   retention_days: 30,
@@ -451,6 +496,9 @@ const AiChatConfig = () => {
         ...imageModelForm,
         provider_id: Number(imageModelForm.provider_id),
         sort_order: Number(imageModelForm.sort_order),
+        upstreams: normalizeImageModelUpstreams(imageModelForm.upstreams).map(
+          ({ client_id, ...upstream }) => upstream,
+        ),
       };
       if (imageModelForm.id) {
         await updateAdminAiImageModel(imageModelForm.id, payload);
@@ -1825,6 +1873,23 @@ const AiChatConfig = () => {
                   </Col>
                   <Col md={3}>
                     <Form.Group className="mb-3">
+                      <Form.Label>Agent 思考模型 ID</Form.Label>
+                      <Form.Control
+                        placeholder="gpt-4.1-mini"
+                        value={imageModelForm.agent_model_id}
+                        onChange={(e) =>
+                          setImageModelForm({
+                            ...imageModelForm,
+                            agent_model_id: e.target.value,
+                          })
+                        }
+                      />
+                    </Form.Group>
+                  </Col>
+                </Row>
+                <Row>
+                  <Col md={3}>
+                    <Form.Group className="mb-3">
                       <Form.Label>默认尺寸</Form.Label>
                       <Form.Control
                         required
@@ -1838,9 +1903,7 @@ const AiChatConfig = () => {
                       />
                     </Form.Group>
                   </Col>
-                </Row>
-                <Row>
-                  <Col md={4}>
+                  <Col md={3}>
                     <Form.Group className="mb-3">
                       <Form.Label>展示名称</Form.Label>
                       <Form.Control
@@ -1854,7 +1917,7 @@ const AiChatConfig = () => {
                       />
                     </Form.Group>
                   </Col>
-                  <Col md={5}>
+                  <Col md={3}>
                     <Form.Group className="mb-3">
                       <Form.Label>描述</Form.Label>
                       <Form.Control
@@ -1884,6 +1947,240 @@ const AiChatConfig = () => {
                     </Form.Group>
                   </Col>
                 </Row>
+                <Row>
+                  <Col md={3}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>接口模式</Form.Label>
+                      <Form.Select
+                        value={imageModelForm.api_mode}
+                        onChange={(e) =>
+                          setImageModelForm({
+                            ...imageModelForm,
+                            api_mode: e.target.value,
+                          })
+                        }>
+                        <option value="images">Images</option>
+                        <option value="responses">Responses</option>
+                      </Form.Select>
+                    </Form.Group>
+                  </Col>
+                  <Col md={3}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>默认质量</Form.Label>
+                      <Form.Select
+                        value={imageModelForm.default_quality}
+                        onChange={(e) =>
+                          setImageModelForm({
+                            ...imageModelForm,
+                            default_quality: e.target.value,
+                          })
+                        }>
+                        <option value="auto">auto</option>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                      </Form.Select>
+                    </Form.Group>
+                  </Col>
+                  <Col md={3}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>默认格式</Form.Label>
+                      <Form.Select
+                        value={imageModelForm.default_format}
+                        onChange={(e) =>
+                          setImageModelForm({
+                            ...imageModelForm,
+                            default_format: e.target.value,
+                          })
+                        }>
+                        <option value="png">PNG</option>
+                        <option value="jpeg">JPEG</option>
+                        <option value="webp">WebP</option>
+                      </Form.Select>
+                    </Form.Group>
+                  </Col>
+                  <Col md={3}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>额外配置 JSON</Form.Label>
+                      <Form.Control
+                        placeholder='{"responses_model_id":"gpt-5.5"}'
+                        value={imageModelForm.extra_config}
+                        onChange={(e) =>
+                          setImageModelForm({
+                            ...imageModelForm,
+                            extra_config: e.target.value,
+                          })
+                        }
+                      />
+                    </Form.Group>
+                  </Col>
+                </Row>
+                <div className="ai-chat-config-checkbox-list mb-3">
+                  <Form.Check
+                    type="switch"
+                    label="支持图片编辑"
+                    checked={imageModelForm.supports_edits}
+                    onChange={(e) =>
+                      setImageModelForm({
+                        ...imageModelForm,
+                        supports_edits: e.target.checked,
+                      })
+                    }
+                  />
+                  <Form.Check
+                    type="switch"
+                    label="支持参考图"
+                    checked={imageModelForm.supports_references}
+                    onChange={(e) =>
+                      setImageModelForm({
+                        ...imageModelForm,
+                        supports_references: e.target.checked,
+                      })
+                    }
+                  />
+                  <Form.Check
+                    type="switch"
+                    label="支持流式"
+                    checked={imageModelForm.supports_stream}
+                    onChange={(e) =>
+                      setImageModelForm({
+                        ...imageModelForm,
+                        supports_stream: e.target.checked,
+                      })
+                    }
+                  />
+                </div>
+                <div className="ai-chat-config-upstream-panel mb-3">
+                  <div className="ai-chat-config-upstream-header">
+                    <div>
+                      <div className="ai-chat-config-upstream-title">
+                        负载均衡端点池
+                      </div>
+                      <div className="ai-chat-config-upstream-subtitle">
+                        填写后将按权重从这里选择上游；留空时使用上方默认
+                        Provider 和供应商模型。
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline-primary"
+                      onClick={() =>
+                        setImageModelForm({
+                          ...imageModelForm,
+                          upstreams: [
+                            ...imageModelForm.upstreams,
+                            newImageModelUpstream(),
+                          ],
+                        })
+                      }>
+                      添加端点
+                    </Button>
+                  </div>
+                  {imageModelForm.upstreams.length === 0 ? (
+                    <div className="ai-chat-config-upstream-empty">
+                      当前使用默认上游。
+                    </div>
+                  ) : (
+                    <div className="ai-chat-config-upstream-list">
+                      {imageModelForm.upstreams.map((upstream, index) => {
+                        const updateUpstream = (
+                          patch: Partial<ImageModelUpstreamForm>,
+                        ) => {
+                          const upstreams = imageModelForm.upstreams.map(
+                            (item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, ...patch }
+                                : item,
+                          );
+                          setImageModelForm({ ...imageModelForm, upstreams });
+                        };
+                        return (
+                          <div
+                            key={upstream.client_id}
+                            className="ai-chat-config-upstream-row">
+                            <Form.Select
+                              value={upstream.provider_id}
+                              onChange={(e) =>
+                                updateUpstream({
+                                  provider_id: Number(e.target.value),
+                                })
+                              }>
+                              <option value={0}>Provider</option>
+                              {imageProviders.map((provider) => (
+                                <option key={provider.id} value={provider.id}>
+                                  {provider.name}
+                                </option>
+                              ))}
+                            </Form.Select>
+                            <Form.Control
+                              placeholder="供应商模型 ID"
+                              value={upstream.provider_model_id}
+                              onChange={(e) =>
+                                updateUpstream({
+                                  provider_model_id: e.target.value,
+                                })
+                              }
+                            />
+                            <Form.Control
+                              placeholder="Agent 模型，可选"
+                              value={upstream.agent_model_id}
+                              onChange={(e) =>
+                                updateUpstream({
+                                  agent_model_id: e.target.value,
+                                })
+                              }
+                            />
+                            <Form.Control
+                              placeholder="Responses 模型，可选"
+                              value={upstream.responses_model_id}
+                              onChange={(e) =>
+                                updateUpstream({
+                                  responses_model_id: e.target.value,
+                                })
+                              }
+                            />
+                            <Form.Control
+                              type="number"
+                              min={1}
+                              value={upstream.weight}
+                              onChange={(e) =>
+                                updateUpstream({
+                                  weight: Math.max(
+                                    1,
+                                    Number(e.target.value || 1),
+                                  ),
+                                })
+                              }
+                            />
+                            <Form.Check
+                              type="switch"
+                              label="启用"
+                              checked={upstream.enabled}
+                              onChange={(e) =>
+                                updateUpstream({ enabled: e.target.checked })
+                              }
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline-danger"
+                              onClick={() =>
+                                setImageModelForm({
+                                  ...imageModelForm,
+                                  upstreams: imageModelForm.upstreams.filter(
+                                    (_, itemIndex) => itemIndex !== index,
+                                  ),
+                                })
+                              }>
+                              删除
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
                 <Form.Check
                   className="mb-3"
                   type="switch"
@@ -1907,7 +2204,9 @@ const AiChatConfig = () => {
                 <th>本站模型 ID</th>
                 <th>Provider</th>
                 <th>供应商模型</th>
+                <th>Agent 思考模型</th>
                 <th>默认尺寸</th>
+                <th>接口模式</th>
                 <th>状态</th>
                 <th>操作</th>
               </tr>
@@ -1917,14 +2216,32 @@ const AiChatConfig = () => {
                 <tr key={model.id}>
                   <td>{model.site_model_id}</td>
                   <td>{model.provider_name}</td>
-                  <td>{model.provider_model_id}</td>
+                  <td>
+                    <div>{model.provider_model_id}</div>
+                    {model.upstreams?.length > 0 && (
+                      <Badge bg="info" className="mt-1">
+                        {model.upstreams.length} 个端点
+                      </Badge>
+                    )}
+                  </td>
+                  <td>{model.agent_model_id || '-'}</td>
                   <td>{model.default_size}</td>
+                  <td>{model.api_mode || 'images'}</td>
                   <td>{model.enabled ? '启用' : '禁用'}</td>
                   <td className="ai-chat-config-action-cell">
                     <Button
                       size="sm"
                       variant="outline-primary"
-                      onClick={() => setImageModelForm(model)}>
+                      onClick={() =>
+                        setImageModelForm({
+                          ...imageModelInit,
+                          ...model,
+                          agent_model_id: model.agent_model_id || '',
+                          upstreams: normalizeImageModelUpstreams(
+                            model.upstreams,
+                          ),
+                        })
+                      }>
                       编辑
                     </Button>
                     <Button

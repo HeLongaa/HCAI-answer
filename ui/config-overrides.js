@@ -42,10 +42,47 @@ module.exports = {
     })(config);
 
     addWebpackPlugin(
+      new webpack.DefinePlugin({
+        __APP_VERSION__: JSON.stringify('embedded'),
+        __DEV_PROXY_CONFIG__: 'undefined',
+      }),
+    )(config);
+
+    addWebpackPlugin(
       new webpack.ProvidePlugin({
         Buffer: ['buffer', 'Buffer'],
       }),
     )(config);
+
+    config.ignoreWarnings = [
+      ...(config.ignoreWarnings || []),
+      (warning) =>
+        warning.module?.resource?.includes('rehype-harden') &&
+        /Failed to parse source map/.test(warning.message || ''),
+    ];
+
+    const excludeRehypeHardenSourceMaps = (rule) => {
+      const uses = Array.isArray(rule.use) ? rule.use : rule.use ? [rule.use] : [];
+      const hasSourceMapLoader =
+        String(rule.loader || '').includes('source-map-loader') ||
+        uses.some((use) => String(use.loader || '').includes('source-map-loader'));
+
+      if (hasSourceMapLoader) {
+        rule.exclude = [
+          ...(Array.isArray(rule.exclude)
+            ? rule.exclude
+            : rule.exclude
+              ? [rule.exclude]
+              : []),
+          /node_modules[\\/]rehype-harden[\\/]/,
+        ];
+      }
+
+      rule.oneOf?.forEach(excludeRehypeHardenSourceMaps);
+      rule.rules?.forEach(excludeRehypeHardenSourceMaps);
+    };
+
+    config.module.rules.forEach(excludeRehypeHardenSourceMaps);
 
     setWebpackOptimizationSplitChunks({
       maxInitialRequests: 20,

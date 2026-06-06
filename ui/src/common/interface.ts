@@ -914,13 +914,32 @@ export interface AiImageModel {
   provider_name: string;
   site_model_id: string;
   provider_model_id: string;
+  agent_model_id: string;
   display_name: string;
   description: string;
   default_size: string;
+  api_mode: 'images' | 'responses';
+  supports_edits: boolean;
+  supports_references: boolean;
+  supports_stream: boolean;
+  default_quality: string;
+  default_format: string;
+  extra_config: string;
   enabled: boolean;
   sort_order: number;
   created_at: number;
   updated_at: number;
+  upstreams?: AiImageModelUpstream[];
+}
+
+export interface AiImageModelUpstream {
+  provider_id: number;
+  provider_name: string;
+  provider_model_id: string;
+  agent_model_id: string;
+  responses_model_id: string;
+  weight: number;
+  enabled: boolean;
 }
 
 export interface AiImageGeneration {
@@ -937,6 +956,15 @@ export interface AiImageGeneration {
   size: string;
   style: string;
   quality: string;
+  output_format?: string;
+  output_compression?: number;
+  moderation?: string;
+  background?: string;
+  reference_images?: string[];
+  mask_image?: string;
+  api_mode?: 'images' | 'responses';
+  response_id?: string;
+  response_output?: string;
   count: number;
   image_urls: string[];
   status: string;
@@ -954,8 +982,34 @@ export interface AiImageGenerateParams {
   size?: string;
   style?: string;
   quality?: string;
+  output_format?: string;
+  output_compression?: number;
+  moderation?: string;
+  background?: string;
+  mask_image?: string;
   count: number;
   reference_images?: string[];
+  stream?: boolean;
+  partial_images?: number;
+}
+
+export interface AiImageAgentGenerationSaveParams {
+  prompt: string;
+  negative_prompt?: string;
+  model: string;
+  aspect_ratio?: string;
+  size?: string;
+  style?: string;
+  quality?: string;
+  output_format?: string;
+  output_compression?: number;
+  moderation?: string;
+  background?: string;
+  mask_image?: string;
+  reference_images?: string[];
+  images: string[];
+  response_id?: string;
+  response_output?: string;
 }
 
 export interface AiImageEditParams {
@@ -971,6 +1025,21 @@ export interface AiImageGenerateResult {
   size: string;
   image_urls: string[];
   expires_at: number;
+}
+
+export interface AiImageAgentConversation {
+  id: number;
+  conversation_id: string;
+  title: string;
+  payload: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AiImageAgentConversationSaveParams {
+  conversation_id: string;
+  title: string;
+  payload: string;
 }
 
 export interface AiVideoModel {

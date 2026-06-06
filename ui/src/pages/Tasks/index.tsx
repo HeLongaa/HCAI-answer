@@ -30,6 +30,15 @@ const statusVariant = {
   rejected: 'danger',
 };
 
+const publicTaskStatuses = new Set([
+  'open',
+  'in_progress',
+  'submitted',
+  'completed',
+  'failed',
+  'closed',
+]);
+
 const getErrorMessage = (err: any, fallback: string) => {
   return err?.msg || err?.message || fallback;
 };
@@ -71,6 +80,9 @@ const Tasks: FC = () => {
   const [submitContent, setSubmitContent] = useState('');
   const [submitLinks, setSubmitLinks] = useState('');
   const [expandedTaskID, setExpandedTaskID] = useState<number | null>(null);
+  const tasks = mine
+    ? data?.list || []
+    : (data?.list || []).filter((task) => publicTaskStatuses.has(task.status));
 
   usePageTags({ title: '任务广场' });
 
@@ -168,8 +180,8 @@ const Tasks: FC = () => {
       </div>
 
       <ListGroup className="question-list-dense question-list-view-card rounded-0 task-square-list">
-        {data?.list?.length === 0 ? <Empty /> : null}
-        {data?.list?.map((task) => {
+        {tasks.length === 0 ? <Empty /> : null}
+        {tasks.map((task) => {
           const isFeatured = task.tags.includes('精选');
           const visibleTags = task.tags.filter((tag) => tag !== '精选');
           const activityTime =

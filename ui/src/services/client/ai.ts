@@ -80,6 +80,31 @@ export const getAiImageGenerations = (limit = 30) => {
   );
 };
 
+export const deleteAiImageGeneration = (params: { generation_id: string }) => {
+  return request.delete('/answer/api/v1/ai-image/generations', params);
+};
+
+export const getAiImageAgentConversations = () => {
+  return request.get<Type.AiImageAgentConversation[]>(
+    '/answer/api/v1/ai-image/agent-conversations',
+  );
+};
+
+export const saveAiImageAgentConversation = (
+  params: Type.AiImageAgentConversationSaveParams,
+) => {
+  return request.put<Type.AiImageAgentConversation>(
+    '/answer/api/v1/ai-image/agent-conversations',
+    params,
+  );
+};
+
+export const deleteAiImageAgentConversation = (params: {
+  conversation_id: string;
+}) => {
+  return request.delete('/answer/api/v1/ai-image/agent-conversations', params);
+};
+
 export const getAiVideoGenerations = (limit = 30) => {
   return request.get<Type.AiVideoGeneration[]>(
     `/answer/api/v1/ai-video/generations?limit=${limit}`,
@@ -89,6 +114,16 @@ export const getAiVideoGenerations = (limit = 30) => {
 export const generateAiImage = (params: Type.AiImageGenerateParams) => {
   return request.post<Type.AiImageGenerateResult>(
     '/answer/api/v1/ai-image/generations',
+    params,
+    { timeout: aiImageTimeout },
+  );
+};
+
+export const saveAiImageAgentGeneration = (
+  params: Type.AiImageAgentGenerationSaveParams,
+) => {
+  return request.post<Type.AiImageGenerateResult>(
+    '/answer/api/v1/ai-image/agent-generations',
     params,
     { timeout: aiImageTimeout },
   );

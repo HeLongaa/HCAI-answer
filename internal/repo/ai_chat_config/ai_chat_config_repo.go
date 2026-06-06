@@ -22,10 +22,12 @@ package ai_chat_config
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/apache/answer/internal/base/data"
 	"github.com/apache/answer/internal/entity"
 	"xorm.io/xorm"
+	"xorm.io/xorm/schemas"
 )
 
 var ErrRedeemCodeUsed = errors.New("redeem code already used")
@@ -84,8 +86,12 @@ type AIChatConfigRepo interface {
 	SaveImageSetting(ctx context.Context, setting *entity.AIImageSetting) error
 	CreateImageGeneration(ctx context.Context, generation *entity.AIImageGeneration) error
 	UpdateImageGeneration(ctx context.Context, generationID string, generation *entity.AIImageGeneration, cols ...string) error
+	DeleteUserImageGeneration(ctx context.Context, userID, generationID string) error
 	ListUserImageGenerations(ctx context.Context, userID string, limit int) ([]*entity.AIImageGeneration, error)
 	CountUserImageGenerations(ctx context.Context, userID string, startAt, endAt any) (int, error)
+	ListUserImageAgentConversations(ctx context.Context, userID string) ([]*entity.AIImageAgentConversation, error)
+	SaveUserImageAgentConversation(ctx context.Context, conversation *entity.AIImageAgentConversation) error
+	DeleteUserImageAgentConversation(ctx context.Context, userID, conversationID string) error
 	ListVideoProviders(ctx context.Context) ([]*entity.AIVideoProvider, error)
 	GetVideoProvider(ctx context.Context, id int) (*entity.AIVideoProvider, bool, error)
 	CreateVideoProvider(ctx context.Context, provider *entity.AIVideoProvider) error
@@ -428,11 +434,15 @@ func (r *aiChatConfigRepo) SumUserChatUsage(ctx context.Context, userID string, 
 }
 
 func (r *aiChatConfigRepo) EnsureImageTables(ctx context.Context) error {
+	if err := r.ensureImageSchemaColumns(ctx); err != nil {
+		return err
+	}
 	if err := r.data.DB.Context(ctx).Sync(
 		new(entity.AIImageProvider),
 		new(entity.AIImageModel),
 		new(entity.AIImageSetting),
 		new(entity.AIImageGeneration),
+		new(entity.AIImageAgentConversation),
 	); err != nil {
 		return err
 	}
@@ -445,6 +455,135 @@ func (r *aiChatConfigRepo) EnsureImageTables(ctx context.Context) error {
 		RetentionDays: 30,
 	})
 	return err
+}
+
+func (r *aiChatConfigRepo) ensureImageSchemaColumns(ctx context.Context) error {
+	if err := r.ensureImageModelColumns(ctx); err != nil {
+		return err
+	}
+	return r.ensureImageGenerationColumns(ctx)
+}
+
+func (r *aiChatConfigRepo) ensureImageModelColumns(ctx context.Context) error {
+	switch r.data.DB.Dialect().URI().DBType {
+	case schemas.MYSQL:
+		return r.ensureColumns(ctx, "ai_image_models", map[string]string{
+			"api_mode":            "VARCHAR(50) NOT NULL DEFAULT 'images'",
+			"supports_edits":      "BOOL NOT NULL DEFAULT TRUE",
+			"supports_references": "BOOL NOT NULL DEFAULT TRUE",
+			"supports_stream":     "BOOL NOT NULL DEFAULT FALSE",
+			"default_quality":     "VARCHAR(50) NOT NULL DEFAULT 'auto'",
+			"default_format":      "VARCHAR(50) NOT NULL DEFAULT 'png'",
+			"extra_config":        "TEXT NULL",
+		})
+	case schemas.POSTGRES:
+		return r.ensureColumns(ctx, "ai_image_models", map[string]string{
+			"api_mode":            "VARCHAR(50) NOT NULL DEFAULT 'images'",
+			"supports_edits":      "BOOLEAN NOT NULL DEFAULT TRUE",
+			"supports_references": "BOOLEAN NOT NULL DEFAULT TRUE",
+			"supports_stream":     "BOOLEAN NOT NULL DEFAULT FALSE",
+			"default_quality":     "VARCHAR(50) NOT NULL DEFAULT 'auto'",
+			"default_format":      "VARCHAR(50) NOT NULL DEFAULT 'png'",
+			"extra_config":        "TEXT NOT NULL DEFAULT ''",
+		})
+	default:
+		return r.ensureColumns(ctx, "ai_image_models", map[string]string{
+			"api_mode":            "TEXT NOT NULL DEFAULT 'images'",
+			"supports_edits":      "INTEGER NOT NULL DEFAULT 1",
+			"supports_references": "INTEGER NOT NULL DEFAULT 1",
+			"supports_stream":     "INTEGER NOT NULL DEFAULT 0",
+			"default_quality":     "TEXT NOT NULL DEFAULT 'auto'",
+			"default_format":      "TEXT NOT NULL DEFAULT 'png'",
+			"extra_config":        "TEXT NOT NULL DEFAULT ''",
+		})
+	}
+}
+
+func (r *aiChatConfigRepo) ensureImageGenerationColumns(ctx context.Context) error {
+	switch r.data.DB.Dialect().URI().DBType {
+	case schemas.MYSQL:
+		return r.ensureColumns(ctx, "ai_image_generations", map[string]string{
+			"output_format":    "VARCHAR(50) NOT NULL DEFAULT ''",
+			"compression":      "INT(11) NOT NULL DEFAULT 0",
+			"moderation":       "VARCHAR(50) NOT NULL DEFAULT ''",
+			"background":       "VARCHAR(50) NOT NULL DEFAULT ''",
+			"reference_images": "TEXT NULL",
+			"mask_image":       "TEXT NULL",
+			"api_mode":         "VARCHAR(50) NOT NULL DEFAULT ''",
+			"response_id":      "VARCHAR(255) NOT NULL DEFAULT ''",
+			"response_output":  "TEXT NULL",
+		})
+	case schemas.POSTGRES:
+		return r.ensureColumns(ctx, "ai_image_generations", map[string]string{
+			"output_format":    "VARCHAR(50) NOT NULL DEFAULT ''",
+			"compression":      "INTEGER NOT NULL DEFAULT 0",
+			"moderation":       "VARCHAR(50) NOT NULL DEFAULT ''",
+			"background":       "VARCHAR(50) NOT NULL DEFAULT ''",
+			"reference_images": "TEXT NOT NULL DEFAULT ''",
+			"mask_image":       "TEXT NOT NULL DEFAULT ''",
+			"api_mode":         "VARCHAR(50) NOT NULL DEFAULT ''",
+			"response_id":      "VARCHAR(255) NOT NULL DEFAULT ''",
+			"response_output":  "TEXT NOT NULL DEFAULT ''",
+		})
+	default:
+		return r.ensureColumns(ctx, "ai_image_generations", map[string]string{
+			"output_format":    "TEXT NOT NULL DEFAULT ''",
+			"compression":      "INTEGER NOT NULL DEFAULT 0",
+			"moderation":       "TEXT NOT NULL DEFAULT ''",
+			"background":       "TEXT NOT NULL DEFAULT ''",
+			"reference_images": "TEXT NOT NULL DEFAULT ''",
+			"mask_image":       "TEXT NOT NULL DEFAULT ''",
+			"api_mode":         "TEXT NOT NULL DEFAULT ''",
+			"response_id":      "TEXT NOT NULL DEFAULT ''",
+			"response_output":  "TEXT NOT NULL DEFAULT ''",
+		})
+	}
+}
+
+func (r *aiChatConfigRepo) ensureColumns(ctx context.Context, table string, columns map[string]string) error {
+	for column, definition := range columns {
+		exists, err := r.columnExists(ctx, table, column)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err = r.data.DB.Context(ctx).Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition)); err != nil {
+			return fmt.Errorf("add column %s.%s failed: %w", table, column, err)
+		}
+	}
+	return nil
+}
+
+func (r *aiChatConfigRepo) columnExists(ctx context.Context, table, column string) (bool, error) {
+	switch r.data.DB.Dialect().URI().DBType {
+	case schemas.MYSQL:
+		rows, err := r.data.DB.Context(ctx).QueryString(
+			"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+			table,
+			column,
+		)
+		return len(rows) > 0, err
+	case schemas.POSTGRES:
+		rows, err := r.data.DB.Context(ctx).QueryString(
+			"SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND column_name = $2",
+			table,
+			column,
+		)
+		return len(rows) > 0, err
+	default:
+		rows, err := r.data.DB.Context(ctx).QueryString(fmt.Sprintf("PRAGMA table_info(%s)", table))
+		if err != nil {
+			return false, err
+		}
+		for _, row := range rows {
+			if row["name"] == column {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
 }
 
 func (r *aiChatConfigRepo) EnsureVideoTables(ctx context.Context) error {
@@ -572,6 +711,13 @@ func (r *aiChatConfigRepo) UpdateImageGeneration(ctx context.Context, generation
 	return err
 }
 
+func (r *aiChatConfigRepo) DeleteUserImageGeneration(ctx context.Context, userID, generationID string) error {
+	_, err := r.data.DB.Context(ctx).
+		Where("user_id = ? AND generation_id = ?", userID, generationID).
+		Delete(new(entity.AIImageGeneration))
+	return err
+}
+
 func (r *aiChatConfigRepo) ListUserImageGenerations(ctx context.Context, userID string, limit int) ([]*entity.AIImageGeneration, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 30
@@ -600,6 +746,39 @@ func (r *aiChatConfigRepo) CountUserImageGenerations(ctx context.Context, userID
 		return 0, err
 	}
 	return total.Count, nil
+}
+
+func (r *aiChatConfigRepo) ListUserImageAgentConversations(ctx context.Context, userID string) ([]*entity.AIImageAgentConversation, error) {
+	list := make([]*entity.AIImageAgentConversation, 0)
+	return list, r.data.DB.Context(ctx).
+		Where("user_id = ?", userID).
+		Desc("updated_at").
+		Find(&list)
+}
+
+func (r *aiChatConfigRepo) SaveUserImageAgentConversation(ctx context.Context, conversation *entity.AIImageAgentConversation) error {
+	exist, err := r.data.DB.Context(ctx).
+		Where("user_id = ? AND conversation_id = ?", conversation.UserID, conversation.ConversationID).
+		Exist(new(entity.AIImageAgentConversation))
+	if err != nil {
+		return err
+	}
+	if exist {
+		_, err = r.data.DB.Context(ctx).
+			Where("user_id = ? AND conversation_id = ?", conversation.UserID, conversation.ConversationID).
+			Cols("title", "payload").
+			Update(conversation)
+		return err
+	}
+	_, err = r.data.DB.Context(ctx).Insert(conversation)
+	return err
+}
+
+func (r *aiChatConfigRepo) DeleteUserImageAgentConversation(ctx context.Context, userID, conversationID string) error {
+	_, err := r.data.DB.Context(ctx).
+		Where("user_id = ? AND conversation_id = ?", userID, conversationID).
+		Delete(new(entity.AIImageAgentConversation))
+	return err
 }
 
 func (r *aiChatConfigRepo) ListVideoProviders(ctx context.Context) ([]*entity.AIVideoProvider, error) {

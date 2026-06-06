@@ -3,7 +3,7 @@ package schema
 type TaskCreateReq struct {
 	Title            string   `validate:"required,min=2,max=150" json:"title"`
 	Description      string   `validate:"required,min=2" json:"description"`
-	Attachments     []string `json:"attachments"`
+	Attachments      []string `json:"attachments"`
 	UserID           string   `json:"-"`
 	IsAdminModerator bool     `json:"-"`
 }
@@ -42,7 +42,8 @@ type TaskSubmitReq struct {
 }
 
 type TaskSubmissionReviewReq struct {
-	SubmissionID int    `validate:"required" json:"submission_id"`
+	SubmissionID int    `json:"submission_id"`
+	TaskID       int    `json:"task_id"`
 	Approved     bool   `json:"approved"`
 	ReviewNote   string `json:"review_note"`
 	OperatorID   string `json:"-"`

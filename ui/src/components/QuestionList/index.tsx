@@ -17,8 +17,8 @@
  * under the License.
  */
 
-import { FC, useEffect, useState } from 'react';
-import { Button, ListGroup, Dropdown } from 'react-bootstrap';
+import { FC, useState } from 'react';
+import { Button, ListGroup } from 'react-bootstrap';
 import { NavLink, useSearchParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -36,8 +36,6 @@ import {
 import * as Type from '@/common/interface';
 import { useSkeletonControl } from '@/hooks';
 import { formatCount, sortTagsForDisplay } from '@/utils';
-import Storage from '@/utils/storage';
-import { LIST_VIEW_STORAGE_KEY } from '@/common/constants';
 
 import './index.scss';
 
@@ -84,13 +82,7 @@ const QuestionList: FC<Props> = ({
     (v) => pinData.findIndex((p) => p.id === v.id) === -1,
   );
 
-  const [viewType, setViewType] = useState('card');
   const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const handleViewMode = (key) => {
-    Storage.set(LIST_VIEW_STORAGE_KEY, key);
-    setViewType(key);
-  };
 
   const handleNavigate = (href) => {
     navigate(href);
@@ -184,11 +176,6 @@ const QuestionList: FC<Props> = ({
     );
   };
 
-  useEffect(() => {
-    const type = Storage.get(LIST_VIEW_STORAGE_KEY) || 'card';
-    setViewType(type);
-  }, []);
-
   return (
     <div>
       <div className="mb-3 d-flex flex-wrap justify-content-between">
@@ -207,6 +194,16 @@ const QuestionList: FC<Props> = ({
             i18nKeyPrefix="question"
             maxBtnCount={source === 'tag' ? 3 : 4}
           />
+          {source === 'questions' ? (
+            <Button
+              as={NavLink as any}
+              to="/questions/add"
+              size="sm"
+              className="question-list-create-post">
+              <Icon name="plus-lg" />
+              <span>发布帖子</span>
+            </Button>
+          ) : null}
           {onRefresh ? (
             <Button
               className="question-list-refresh"
@@ -222,32 +219,6 @@ const QuestionList: FC<Props> = ({
               />
             </Button>
           ) : null}
-          <Dropdown align="end" drop="down" onSelect={handleViewMode}>
-            <Dropdown.Toggle variant="outline-secondary" size="sm">
-              <Icon name={viewType === 'card' ? 'view-stacked' : 'list'} />
-            </Dropdown.Toggle>
-
-            <Dropdown.Menu
-              renderOnMount
-              className="question-view-dropdown-menu"
-              popperConfig={{
-                strategy: 'fixed',
-                modifiers: [
-                  { name: 'flip', enabled: false },
-                  { name: 'preventOverflow', enabled: false },
-                ],
-              }}>
-              <Dropdown.Header as="h6">
-                {t('view', { keyPrefix: 'btns' })}
-              </Dropdown.Header>
-              <Dropdown.Item eventKey="card" active={viewType === 'card'}>
-                {t('card', { keyPrefix: 'btns' })}
-              </Dropdown.Item>
-              <Dropdown.Item eventKey="compact" active={viewType === 'compact'}>
-                {t('compact', { keyPrefix: 'btns' })}
-              </Dropdown.Item>
-            </Dropdown.Menu>
-          </Dropdown>
         </div>
       </div>
       <div className="question-list-table-head">
@@ -256,8 +227,7 @@ const QuestionList: FC<Props> = ({
         <span>{t('views')}</span>
         <span>{t('activity')}</span>
       </div>
-      <ListGroup
-        className={`question-list-dense question-list-view-${viewType} rounded-0`}>
+      <ListGroup className="question-list-dense question-list-view-card rounded-0">
         {isSkeletonShow ? (
           <QuestionListLoader />
         ) : (

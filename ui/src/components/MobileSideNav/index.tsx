@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 
 import classNames from 'classnames';
@@ -65,7 +65,7 @@ const MobileSideNav = ({ show, onHide }) => {
   >([]);
   const [conversationID, setConversationID] = useState('');
 
-  const closeSideNav = () => onHide(false);
+  const closeSideNav = useCallback(() => onHide(false), [onHide]);
   const startNewConversation = () => {
     window.dispatchEvent(new CustomEvent('hcai-start-new-conversation'));
     closeSideNav();
@@ -112,6 +112,20 @@ const MobileSideNav = ({ show, onHide }) => {
         setConversationList([]);
       });
   }, [isChat, show]);
+
+  useEffect(() => {
+    const handleCloseMobileSideNav = () => closeSideNav();
+    window.addEventListener(
+      'hcai-close-mobile-side-nav',
+      handleCloseMobileSideNav,
+    );
+    return () => {
+      window.removeEventListener(
+        'hcai-close-mobile-side-nav',
+        handleCloseMobileSideNav,
+      );
+    };
+  }, [closeSideNav]);
 
   return (
     <>
@@ -202,41 +216,54 @@ const MobileSideNav = ({ show, onHide }) => {
               ))}
             </nav>
 
-            <div className="mobile-chat-section">
-              <button
-                type="button"
-                className="mobile-chat-section-toggle"
-                aria-expanded={conversationsOpen}
-                aria-controls="mobile-chat-conversations"
-                onClick={() => setConversationsOpen((open) => !open)}>
-                <Icon
-                  name={conversationsOpen ? 'chevron-down' : 'chevron-right'}
-                />
-                <span>对话</span>
-              </button>
-              {conversationsOpen ? (
-                <div
-                  id="mobile-chat-conversations"
-                  className="mobile-chat-conversation-list">
-                  <span className="mobile-chat-time">过去 7 天</span>
-                  {conversationList.length > 0 ? (
-                    conversationList.map((item) => (
-                      <button
-                        type="button"
-                        className={classNames('mobile-chat-item', {
-                          active: item.conversation_id === conversationID,
-                        })}
-                        key={item.conversation_id}
-                        onClick={() => loadConversation(item.conversation_id)}>
-                        {item.topic}
-                      </button>
-                    ))
-                  ) : (
-                    <span className="mobile-chat-empty">暂无对话</span>
-                  )}
-                </div>
-              ) : null}
-            </div>
+            {isImageWorkspace || isVideoWorkspace ? (
+              <div
+                id={
+                  isImageWorkspace
+                    ? 'hcai-mobile-sidenav-image-tasks'
+                    : 'hcai-mobile-sidenav-video-tasks'
+                }
+                className="mobile-chat-section mobile-workspace-task-section"
+              />
+            ) : (
+              <div className="mobile-chat-section">
+                <button
+                  type="button"
+                  className="mobile-chat-section-toggle"
+                  aria-expanded={conversationsOpen}
+                  aria-controls="mobile-chat-conversations"
+                  onClick={() => setConversationsOpen((open) => !open)}>
+                  <Icon
+                    name={conversationsOpen ? 'chevron-down' : 'chevron-right'}
+                  />
+                  <span>对话</span>
+                </button>
+                {conversationsOpen ? (
+                  <div
+                    id="mobile-chat-conversations"
+                    className="mobile-chat-conversation-list">
+                    <span className="mobile-chat-time">过去 7 天</span>
+                    {conversationList.length > 0 ? (
+                      conversationList.map((item) => (
+                        <button
+                          type="button"
+                          className={classNames('mobile-chat-item', {
+                            active: item.conversation_id === conversationID,
+                          })}
+                          key={item.conversation_id}
+                          onClick={() =>
+                            loadConversation(item.conversation_id)
+                          }>
+                          {item.topic}
+                        </button>
+                      ))
+                    ) : (
+                      <span className="mobile-chat-empty">暂无对话</span>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
         ) : isAdmin ? (
           <AdminSideNav showBrand={false} />
