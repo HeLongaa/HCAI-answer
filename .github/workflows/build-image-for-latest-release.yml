@@ -28,8 +28,15 @@ on:
   #   branches: [ "main" ]
 
 jobs:
+  quality-gate:
+    if: ${{ github.repository_owner == 'apache' }}
+    uses: ./.github/workflows/reusable-quality-gate.yml
+    with:
+      ref: ${{ github.ref }}
+
   build:
     if: ${{ github.repository_owner == 'apache' }}
+    needs: quality-gate
     runs-on: ubuntu-latest
     steps:
     - name: Checkout

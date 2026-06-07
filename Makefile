@@ -1,4 +1,4 @@
-.PHONY: build clean ui
+.PHONY: all build check clean generate helm-check install-ui-packages lint lint-fix test ui universal
 
 VERSION=2.0.1
 BIN=answer
@@ -13,6 +13,9 @@ GO=$(GO_ENV) "$(RAW_GO)"
 GO_BIN=$(shell "$(RAW_GO)" env GOPATH)/bin
 
 GOLANGCI_VERSION ?= v2.6.2
+SWAG_VERSION ?= v1.16.3
+WIRE_VERSION ?= v0.5.0
+MOCKGEN_VERSION ?= v0.6.0
 TOOLS_BIN := $(shell mkdir -p build/tools && realpath build/tools)
 
 GOLANGCI = $(TOOLS_BIN)/golangci-lint-$(GOLANGCI_VERSION)
@@ -32,12 +35,9 @@ universal: generate
 	@rm -f ${BIN}_amd64 ${BIN}_arm64
 
 generate:
-	@$(GO) get github.com/swaggo/swag/cmd/swag@v1.16.3
-	@$(GO) get github.com/google/wire/cmd/wire@v0.5.0
-	@$(GO) get go.uber.org/mock/mockgen@v0.6.0
-	@$(GO) install github.com/swaggo/swag/cmd/swag@v1.16.3
-	@$(GO) install github.com/google/wire/cmd/wire@v0.5.0
-	@$(GO) install go.uber.org/mock/mockgen@v0.6.0
+	@$(GO) install github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION)
+	@$(GO) install github.com/google/wire/cmd/wire@$(WIRE_VERSION)
+	@$(GO) install go.uber.org/mock/mockgen@$(MOCKGEN_VERSION)
 	@PATH="$(GO_BIN):$(PATH)" $(GO) generate ./...
 	@$(GO) mod tidy
 
@@ -47,7 +47,11 @@ check:
 	@PATH="$(GO_BIN):$(PATH)" wire flags
 
 test:
-	@$(GO) test ./internal/repo/repo_test
+	@$(GO) test ./...
+
+helm-check:
+	@helm lint charts
+	@helm template answer charts >/tmp/answer-chart.yaml
 
 # clean all build result
 clean:

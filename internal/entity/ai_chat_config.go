@@ -144,6 +144,7 @@ type AIChatUsageLog struct {
 	ProviderName     string    `xorm:"not null default '' VARCHAR(255) provider_name"`
 	ProviderModelID  string    `xorm:"not null default '' VARCHAR(255) provider_model_id"`
 	ConsumePoints    float64   `xorm:"not null default 0 DOUBLE consume_points"`
+	Status           string    `xorm:"not null default 'completed' VARCHAR(50) status"`
 	CreatedAt        time.Time `xorm:"created not null default CURRENT_TIMESTAMP TIMESTAMP created_at"`
 }
 
@@ -282,6 +283,13 @@ type AIVideoSetting struct {
 }
 
 func (AIVideoSetting) TableName() string { return "ai_video_settings" }
+
+const (
+	AIVideoStatusQueued     = "queued"
+	AIVideoStatusInProgress = "in_progress"
+	AIVideoStatusCompleted  = "completed"
+	AIVideoStatusFailed     = "failed"
+)
 
 type AIVideoGeneration struct {
 	ID              int       `xorm:"not null pk autoincr INT(11) id"`

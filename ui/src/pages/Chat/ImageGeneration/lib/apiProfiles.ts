@@ -15,13 +15,13 @@ import type {
 } from '../types'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, DEFAULT_ZIP_DOWNLOAD_ROUTES, ZIP_DOWNLOAD_ROUTE_VALUES } from '../types'
 import { shouldUseApiProxy } from './devProxy'
+import { isImportableConfigUrl } from './importableConfigUrl'
 import { readRuntimeEnv } from './runtimeEnv'
-import { isImportableConfigUrl } from './customProviderConfigUrl'
 
 const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1'
-const RAW_DEFAULT_API_URL = readRuntimeEnv(undefined)
-const DEFAULT_OPENAI_API_PROXY = readRuntimeEnv(undefined) === 'true'
-const DOCKER_DEPLOYMENT = readRuntimeEnv(undefined) === 'true'
+const RAW_DEFAULT_API_URL = readRuntimeEnv('VITE_DEFAULT_API_URL')
+const DEFAULT_OPENAI_API_PROXY = readRuntimeEnv('VITE_API_PROXY_AVAILABLE') === 'true'
+const DOCKER_DEPLOYMENT = readRuntimeEnv('VITE_DOCKER_DEPLOYMENT') === 'true'
 const DEFAULT_BASE_URL = isImportableConfigUrl(RAW_DEFAULT_API_URL)
   ? ''
   : RAW_DEFAULT_API_URL || (DOCKER_DEPLOYMENT && DEFAULT_OPENAI_API_PROXY ? '' : OPENAI_DEFAULT_BASE_URL)

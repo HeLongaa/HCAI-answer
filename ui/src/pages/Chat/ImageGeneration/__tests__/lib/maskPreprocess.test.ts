@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { calculateMaskWorkingSize, replaceMaskTargetImage } from '../../../../../src/pages/Chat/ImageGeneration/lib/maskPreprocess'
-import type { InputImage } from '../../../../../src/pages/Chat/ImageGeneration/types'
+import { calculateMaskWorkingSize, replaceMaskTargetImage } from '@/pages/Chat/ImageGeneration/lib/maskPreprocess'
+import type { InputImage } from '@/pages/Chat/ImageGeneration/types'
 
 function image(id: string): InputImage {
   return { id, dataUrl: `data:image/png;base64,${id}` }

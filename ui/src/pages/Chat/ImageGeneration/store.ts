@@ -2717,6 +2717,8 @@ function createSettingsForApiProfile(
     apiMode: profile.apiMode,
     codexCli: profile.codexCli,
     apiProxy: profile.apiProxy,
+    streamImages: profile.streamImages,
+    streamPartialImages: profile.streamPartialImages,
     profiles: normalized.profiles.map((item) =>
       item.id === profile.id ? profile : item,
     ),
@@ -3546,6 +3548,9 @@ export async function submitTask(
       appMode === 'gallery'
         ? selectedSystemImageModel?.site_model_id || ''
         : activeProfile.model,
+    streamPartialImages: normalizeStreamPartialImages(
+      requestSettings.streamPartialImages,
+    ),
     inputImageIds: orderedInputImages.map((i) => i.id),
     maskTargetImageId,
     maskImageId,
@@ -4556,6 +4561,7 @@ async function executeSystemImageTask(taskId: string) {
             ...requestParams,
             stream: true,
             partial_images: normalizeStreamPartialImages(
+              task.streamPartialImages,
               DEFAULT_SETTINGS.streamPartialImages,
             ),
           },
@@ -5516,6 +5522,9 @@ async function executeAgentRound(
     if (round.maskImageId && !maskDataUrl) throw new Error('遮罩图片已不存在');
     const shouldStreamAgentResponses =
       agentSystemImageModel.supports_stream === true;
+    const streamPartialImages = normalizeStreamPartialImages(
+      requestSettings.streamPartialImages,
+    );
 
     const apiInput = await buildAgentApiInput(
       conversation,
@@ -5610,6 +5619,7 @@ async function executeAgentRound(
           options.systemImageModel?.site_model_id ||
           agentSystemImageModel.site_model_id,
         inputImageIds,
+        streamPartialImages,
         maskTargetImageId:
           options.maskTargetImageId !== undefined
             ? options.maskTargetImageId
@@ -5897,7 +5907,7 @@ async function executeAgentRound(
           referenceIds,
           stream: shouldStreamAgentResponses,
           streamPartialImages: shouldStreamAgentResponses
-            ? DEFAULT_SETTINGS.streamPartialImages
+            ? streamPartialImages
             : undefined,
           signal: controller.signal,
           onImageToolStarted: shouldStreamAssistantMessage
@@ -6006,7 +6016,7 @@ async function executeAgentRound(
         stream: shouldStreamAgentResponses,
         streamPartialImages:
           shouldStreamAgentResponses === true
-            ? DEFAULT_SETTINGS.streamPartialImages
+            ? streamPartialImages
             : undefined,
         input: apiInputForTurn,
         maskDataUrl,

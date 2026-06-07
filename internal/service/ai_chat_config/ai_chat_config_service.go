@@ -33,6 +33,7 @@ import (
 	"math"
 	"math/big"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -56,11 +57,25 @@ import (
 	"github.com/segmentfault/pacman/log"
 )
 
+const (
+	videoReferenceImageMaxCount  = 4
+	videoReferenceImageMaxBytes  = 5 * 1024 * 1024
+	defaultImageDownloadMaxBytes = 20 * 1024 * 1024
+	imageDownloadTimeout         = 15 * time.Second
+	adminAIConfigFetchTimeout    = 30 * time.Second
+	adminAIConfigTestTimeout     = 60 * time.Second
+	videoCreateTimeout           = 60 * time.Second
+	videoStatusTimeout           = 15 * time.Second
+	videoContentTimeout          = 5 * time.Minute
+)
+
 var (
-	modelIDPattern    = regexp.MustCompile(`^[a-z0-9_-]+$`)
-	base64DataPattern = regexp.MustCompile(`"b64_json"\s*:\s*"[^"]+"`)
-	dataURLPattern    = regexp.MustCompile(`data:image/[^;]+;base64,[A-Za-z0-9+/=_-]+`)
-	retryAfterPattern = regexp.MustCompile(`(?i)try again in\s+(\d+)\s*ms`)
+	modelIDPattern     = regexp.MustCompile(`^[a-z0-9_-]+$`)
+	base64DataPattern  = regexp.MustCompile(`"b64_json"\s*:\s*"[^"]+"`)
+	dataURLPattern     = regexp.MustCompile(`data:image/[^;]+;base64,[A-Za-z0-9+/=_-]+`)
+	retryAfterPattern  = regexp.MustCompile(`(?i)try again in\s+(\d+)\s*ms`)
+	bearerTokenPattern = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]+`)
+	secretJSONPattern  = regexp.MustCompile(`(?i)"(api[_-]?key|authorization|token|secret|access[_-]?token)"\s*:\s*"[^"]+"`)
 )
 
 type AiChatConfigService interface {
@@ -97,8 +112,9 @@ type AiChatConfigService interface {
 	SaveConsumeRate(ctx context.Context, id int, req *schema.AIModelConsumeRateReq) (*schema.AIModelConsumeRateResp, error)
 	GetModelConsumeRate(ctx context.Context, siteModelID string) (float64, error)
 	CalculateChatCost(ctx context.Context, siteModelID string, baseCost float64) (float64, error)
-	DeductUserPoints(ctx context.Context, userID string, cost float64) error
-	RecordChatUsage(ctx context.Context, req *schema.AIChatUsageLogReq) error
+	ReserveChatUsage(ctx context.Context, req *schema.AIChatUsageLogReq) error
+	CompleteChatUsage(ctx context.Context, chatCompletionID string) error
+	ReleaseChatUsage(ctx context.Context, chatCompletionID string) error
 
 	ListImageProviders(ctx context.Context) ([]*schema.AIImageProviderResp, error)
 	CreateImageProvider(ctx context.Context, req *schema.AIImageProviderReq) (*schema.AIImageProviderResp, error)
@@ -110,6 +126,7 @@ type AiChatConfigService interface {
 	GetImageSetting(ctx context.Context) (*schema.AIImageSettingResp, error)
 	SaveImageSetting(ctx context.Context, req *schema.AIImageSettingReq) (*schema.AIImageSettingResp, error)
 	ResolveImageAgentUpstream(ctx context.Context, siteImageModelID string) (*schema.AIImageAgentUpstreamResp, error)
+	CheckImageQuota(ctx context.Context, userID string, count int) error
 	GenerateImage(ctx context.Context, userID string, req *schema.AIImageGenerateReq) (*schema.AIImageGenerateResp, error)
 	GenerateImageStream(ctx context.Context, userID string, req *schema.AIImageGenerateReq, writer io.Writer, flush func()) error
 	SaveAgentImageGeneration(ctx context.Context, userID string, req *schema.AIImageAgentGenerationSaveReq) (*schema.AIImageGenerateResp, error)
@@ -155,7 +172,10 @@ func (s *aiChatConfigService) ListProviders(ctx context.Context) ([]*schema.AIPr
 	}
 	resp := make([]*schema.AIProviderResp, 0, len(providers))
 	for _, provider := range providers {
-		models, _ := s.repo.ListProviderModels(ctx, provider.ID)
+		models, err := s.repo.ListProviderModels(ctx, provider.ID)
+		if err != nil {
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
 		resp = append(resp, s.formatProvider(provider, models, true))
 	}
 	return resp, nil
@@ -169,7 +189,10 @@ func (s *aiChatConfigService) GetProvider(ctx context.Context, providerID int) (
 	if !exist {
 		return nil, errors.BadRequest(reason.ObjectNotFound)
 	}
-	models, _ := s.repo.ListProviderModels(ctx, provider.ID)
+	models, err := s.repo.ListProviderModels(ctx, provider.ID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
 	return s.formatProvider(provider, models, true), nil
 }
 
@@ -177,7 +200,7 @@ func (s *aiChatConfigService) CreateProvider(ctx context.Context, req *schema.AI
 	if strings.TrimSpace(req.APIKey) == "" {
 		return nil, errors.BadRequest("api_key is required")
 	}
-	baseURL, err := normalizeBaseURL(req.BaseURL)
+	baseURL, err := normalizeProviderBaseURL(ctx, req.BaseURL)
 	if err != nil {
 		return nil, errors.BadRequest("base_url is invalid")
 	}
@@ -203,7 +226,7 @@ func (s *aiChatConfigService) UpdateProvider(ctx context.Context, id int, req *s
 	if !exist {
 		return nil, errors.BadRequest(reason.ObjectNotFound)
 	}
-	baseURL, err := normalizeBaseURL(req.BaseURL)
+	baseURL, err := normalizeProviderBaseURL(ctx, req.BaseURL)
 	if err != nil {
 		return nil, errors.BadRequest("base_url is invalid")
 	}
@@ -220,11 +243,21 @@ func (s *aiChatConfigService) UpdateProvider(ctx context.Context, id int, req *s
 	if err := s.repo.UpdateProvider(ctx, provider, cols...); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
-	models, _ := s.repo.ListProviderModels(ctx, provider.ID)
+	models, err := s.repo.ListProviderModels(ctx, provider.ID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
 	return s.formatProvider(provider, models, true), nil
 }
 
 func (s *aiChatConfigService) DeleteProvider(ctx context.Context, id int) error {
+	count, err := s.repo.CountProviderMappingItems(ctx, id)
+	if err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if count > 0 {
+		return errors.BadRequest("provider is still used by model mappings")
+	}
 	if err := s.repo.DeleteProvider(ctx, id); err != nil {
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
@@ -313,8 +346,15 @@ func (s *aiChatConfigService) ListModelMappings(ctx context.Context) ([]*schema.
 	}
 	resp := make([]*schema.AIModelMappingResp, 0, len(mappings))
 	for _, mapping := range mappings {
-		items, _ := s.repo.ListModelMappingItems(ctx, mapping.ID)
-		resp = append(resp, s.formatMapping(ctx, mapping, items))
+		items, err := s.repo.ListModelMappingItems(ctx, mapping.ID)
+		if err != nil {
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
+		mappingResp, err := s.formatMapping(ctx, mapping, items)
+		if err != nil {
+			return nil, err
+		}
+		resp = append(resp, mappingResp)
 	}
 	return resp, nil
 }
@@ -337,7 +377,7 @@ func (s *aiChatConfigService) CreateModelMapping(ctx context.Context, req *schem
 	if err := s.repo.CreateModelMapping(ctx, mapping, items); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
-	return s.formatMapping(ctx, mapping, items), nil
+	return s.formatMapping(ctx, mapping, items)
 }
 
 func (s *aiChatConfigService) UpdateModelMapping(ctx context.Context, id int, req *schema.AIModelMappingReq) (*schema.AIModelMappingResp, error) {
@@ -363,7 +403,7 @@ func (s *aiChatConfigService) UpdateModelMapping(ctx context.Context, id int, re
 	if err := s.repo.UpdateModelMapping(ctx, mapping, items); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
-	return s.formatMapping(ctx, mapping, items), nil
+	return s.formatMapping(ctx, mapping, items)
 }
 
 func (s *aiChatConfigService) DeleteModelMapping(ctx context.Context, id int) error {
@@ -381,8 +421,11 @@ func (s *aiChatConfigService) GetModelMapping(ctx context.Context, siteModelID s
 	if !exist || !mapping.Enabled {
 		return nil, errors.BadRequest(reason.ObjectNotFound)
 	}
-	items, _ := s.repo.ListModelMappingItems(ctx, mapping.ID)
-	return s.formatMapping(ctx, mapping, items), nil
+	items, err := s.repo.ListModelMappingItems(ctx, mapping.ID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	return s.formatMapping(ctx, mapping, items)
 }
 
 func (s *aiChatConfigService) ResolveUpstreamModel(ctx context.Context, siteModelID string) (*schema.AIUpstreamModelResp, error) {
@@ -444,7 +487,11 @@ func (s *aiChatConfigService) ListSubscriptionPlans(ctx context.Context) ([]*sch
 	}
 	resp := make([]*schema.AISubscriptionPlanResp, 0, len(plans))
 	for _, plan := range plans {
-		resp = append(resp, s.formatPlan(ctx, plan))
+		planResp, err := s.formatPlan(ctx, plan)
+		if err != nil {
+			return nil, err
+		}
+		resp = append(resp, planResp)
 	}
 	return resp, nil
 }
@@ -457,7 +504,7 @@ func (s *aiChatConfigService) CreateSubscriptionPlan(ctx context.Context, req *s
 	if err := s.repo.CreateSubscriptionPlan(ctx, plan, req.ModelMappingIDs); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
-	return s.formatPlan(ctx, plan), nil
+	return s.formatPlan(ctx, plan)
 }
 
 func (s *aiChatConfigService) UpdateSubscriptionPlan(ctx context.Context, id int, req *schema.AISubscriptionPlanReq) (*schema.AISubscriptionPlanResp, error) {
@@ -479,7 +526,7 @@ func (s *aiChatConfigService) UpdateSubscriptionPlan(ctx context.Context, id int
 	if err := s.repo.UpdateSubscriptionPlan(ctx, updated, req.ModelMappingIDs); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
-	return s.formatPlan(ctx, updated), nil
+	return s.formatPlan(ctx, updated)
 }
 
 func (s *aiChatConfigService) DeleteSubscriptionPlan(ctx context.Context, id int) error {
@@ -507,7 +554,11 @@ func (s *aiChatConfigService) GetAvailableModelsForPlan(ctx context.Context, pla
 	if !exist || !plan.Enabled {
 		return nil, errors.BadRequest("subscription plan is not available")
 	}
-	return s.formatPlan(ctx, plan).AvailableModelIDs, nil
+	planResp, err := s.formatPlan(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	return planResp.AvailableModelIDs, nil
 }
 
 func (s *aiChatConfigService) ListUserAvailableModels(ctx context.Context, userID string) ([]*schema.AIChatModelResp, error) {
@@ -590,18 +641,13 @@ func (s *aiChatConfigService) GetSubscriptionOverview(ctx context.Context, userI
 	if err != nil {
 		return nil, err
 	}
-	planResp := s.formatPlan(ctx, plan)
-	periodStart := user.SubscriptionStartedAt
-	if plan.PlanID == "free" || periodStart.IsZero() {
-		periodStart = user.CreatedAt
+	planResp, err := s.formatPlan(ctx, plan)
+	if err != nil {
+		return nil, err
 	}
-	periodEnd := user.SubscriptionExpiresAt
 	expiresAt := int64(0)
-	if plan.PlanID != "free" && !periodEnd.IsZero() {
-		expiresAt = periodEnd.Unix()
-	}
-	if plan.PlanID == "free" || periodEnd.IsZero() {
-		periodEnd = time.Time{}
+	if plan.PlanID != "free" && !user.SubscriptionExpiresAt.IsZero() {
+		expiresAt = user.SubscriptionExpiresAt.Unix()
 	}
 	monthStart, monthEnd := currentMonthRange()
 	chatUsage, err := s.repo.SumUserChatUsage(ctx, userID, monthStart, monthEnd)
@@ -669,8 +715,8 @@ func (s *aiChatConfigService) GetSubscriptionOverview(ctx context.Context, userI
 		VideoQuotaRemaining: videoRemaining,
 		AvailableModels:     planResp.AvailableModelIDs,
 		ConsumeRates:        s.listSubscriptionModelRates(ctx),
-		PeriodStart:         unixOrZero(periodStart),
-		PeriodEnd:           unixOrZero(periodEnd),
+		PeriodStart:         monthStart.Unix(),
+		PeriodEnd:           monthEnd.Unix(),
 		ExpiresAt:           expiresAt,
 	}, nil
 }
@@ -814,14 +860,7 @@ func (s *aiChatConfigService) RedeemSubscriptionCode(ctx context.Context, userID
 		return nil, errors.BadRequest(reason.UserNotFound)
 	}
 	now := time.Now()
-	startAt := now
-	baseAt := now
-	if !user.SubscriptionExpiresAt.IsZero() && user.SubscriptionExpiresAt.After(now) && user.SubscriptionLevel != "free" {
-		baseAt = user.SubscriptionExpiresAt
-		if !user.SubscriptionStartedAt.IsZero() {
-			startAt = user.SubscriptionStartedAt
-		}
-	}
+	startAt, baseAt := subscriptionRedeemRange(user, plan.PlanID, now)
 	expiresAt := baseAt.AddDate(0, redeemCode.DurationMonths, 0)
 	user.SubscriptionLevel = plan.PlanID
 	user.SubscriptionStartedAt = startAt
@@ -850,7 +889,11 @@ func (s *aiChatConfigService) ListConsumeRates(ctx context.Context) ([]*schema.A
 	}
 	resp := make([]*schema.AIModelConsumeRateResp, 0, len(rates))
 	for _, rate := range rates {
-		resp = append(resp, s.formatRate(ctx, rate))
+		rateResp, err := s.formatRate(ctx, rate)
+		if err != nil {
+			return nil, err
+		}
+		resp = append(resp, rateResp)
 	}
 	return resp, nil
 }
@@ -859,8 +902,8 @@ func (s *aiChatConfigService) SaveConsumeRate(ctx context.Context, id int, req *
 	if req.ModelMappingID <= 0 {
 		return nil, errors.BadRequest("model_mapping_id is required")
 	}
-	if req.ConsumeRate <= 0 {
-		return nil, errors.BadRequest("consume_rate must be greater than 0")
+	if req.ConsumeRate <= 0 || req.ConsumeRate > 1000 {
+		return nil, errors.BadRequest("consume_rate must be greater than 0 and less than or equal to 1000")
 	}
 	mapping, exist, err := s.repo.GetModelMapping(ctx, req.ModelMappingID)
 	if err != nil {
@@ -890,7 +933,7 @@ func (s *aiChatConfigService) SaveConsumeRate(ctx context.Context, id int, req *
 	if err := s.repo.SaveConsumeRate(ctx, rate); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
-	return s.formatRate(ctx, rate), nil
+	return s.formatRate(ctx, rate)
 }
 
 func (s *aiChatConfigService) GetModelConsumeRate(ctx context.Context, siteModelID string) (float64, error) {
@@ -919,8 +962,14 @@ func (s *aiChatConfigService) CalculateChatCost(ctx context.Context, siteModelID
 	return baseCost * rate, nil
 }
 
-func (s *aiChatConfigService) DeductUserPoints(ctx context.Context, userID string, cost float64) error {
-	user, exist, err := s.userRepo.GetByUserID(ctx, userID)
+func (s *aiChatConfigService) ReserveChatUsage(ctx context.Context, req *schema.AIChatUsageLogReq) error {
+	if req == nil || req.UserID == "" || req.ChatCompletionID == "" || req.SiteModelID == "" {
+		return nil
+	}
+	if req.ConsumePoints <= 0 {
+		req.ConsumePoints = 1
+	}
+	user, exist, err := s.userRepo.GetByUserID(ctx, req.UserID)
 	if err != nil {
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
@@ -931,28 +980,8 @@ func (s *aiChatConfigService) DeductUserPoints(ctx context.Context, userID strin
 	if err != nil {
 		return err
 	}
-	if plan.ChatPoints == -1 {
-		return nil
-	}
 	monthStart, monthEnd := currentMonthRange()
-	used, err := s.repo.SumUserChatUsage(ctx, userID, monthStart, monthEnd)
-	if err != nil {
-		return errors.InternalServer(reason.DatabaseError).WithError(err)
-	}
-	if int(math.Ceil(used+cost)) > plan.ChatPoints {
-		return errors.BadRequest("chat points are insufficient")
-	}
-	return nil
-}
-
-func (s *aiChatConfigService) RecordChatUsage(ctx context.Context, req *schema.AIChatUsageLogReq) error {
-	if req == nil || req.UserID == "" || req.ChatCompletionID == "" || req.SiteModelID == "" {
-		return nil
-	}
-	if req.ConsumePoints <= 0 {
-		req.ConsumePoints = 1
-	}
-	if err := s.repo.CreateUsageLog(ctx, &entity.AIChatUsageLog{
+	err = s.repo.ReserveChatUsage(ctx, &entity.AIChatUsageLog{
 		UserID:           req.UserID,
 		ConversationID:   req.ConversationID,
 		ChatCompletionID: req.ChatCompletionID,
@@ -961,7 +990,32 @@ func (s *aiChatConfigService) RecordChatUsage(ctx context.Context, req *schema.A
 		ProviderName:     req.ProviderName,
 		ProviderModelID:  req.ProviderModelID,
 		ConsumePoints:    req.ConsumePoints,
-	}); err != nil {
+		Status:           "reserved",
+	}, plan.ChatPoints, monthStart, monthEnd)
+	if err != nil {
+		if stderrors.Is(err, ai_chat_config_repo.ErrQuotaInsufficient) {
+			return errors.BadRequest("chat points are insufficient")
+		}
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	return nil
+}
+
+func (s *aiChatConfigService) CompleteChatUsage(ctx context.Context, chatCompletionID string) error {
+	if strings.TrimSpace(chatCompletionID) == "" {
+		return nil
+	}
+	if err := s.repo.CompleteChatUsage(ctx, chatCompletionID); err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	return nil
+}
+
+func (s *aiChatConfigService) ReleaseChatUsage(ctx context.Context, chatCompletionID string) error {
+	if strings.TrimSpace(chatCompletionID) == "" {
+		return nil
+	}
+	if err := s.repo.ReleaseChatUsage(ctx, chatCompletionID); err != nil {
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
 	return nil
@@ -989,7 +1043,7 @@ func (s *aiChatConfigService) CreateImageProvider(ctx context.Context, req *sche
 	if strings.TrimSpace(req.APIKey) == "" {
 		return nil, errors.BadRequest("api_key is required")
 	}
-	baseURL, err := normalizeBaseURL(req.BaseURL)
+	baseURL, err := normalizeProviderBaseURL(ctx, req.BaseURL)
 	if err != nil {
 		return nil, errors.BadRequest("base_url is invalid")
 	}
@@ -1017,7 +1071,7 @@ func (s *aiChatConfigService) UpdateImageProvider(ctx context.Context, id int, r
 	if !exist {
 		return nil, errors.BadRequest(reason.ObjectNotFound)
 	}
-	baseURL, err := normalizeBaseURL(req.BaseURL)
+	baseURL, err := normalizeProviderBaseURL(ctx, req.BaseURL)
 	if err != nil {
 		return nil, errors.BadRequest("base_url is invalid")
 	}
@@ -1040,6 +1094,13 @@ func (s *aiChatConfigService) DeleteImageProvider(ctx context.Context, id int) e
 	if err := s.ensureImageTables(ctx); err != nil {
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
+	count, err := s.repo.CountImageModelsByProvider(ctx, id)
+	if err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if count > 0 {
+		return errors.BadRequest("provider is still used by image models")
+	}
 	if err := s.repo.DeleteImageProvider(ctx, id); err != nil {
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
@@ -1056,7 +1117,11 @@ func (s *aiChatConfigService) ListImageModels(ctx context.Context, onlyEnabled b
 	}
 	resp := make([]*schema.AIImageModelResp, 0, len(models))
 	for _, model := range models {
-		resp = append(resp, s.formatImageModel(ctx, model))
+		modelResp, err := s.formatImageModel(ctx, model)
+		if err != nil {
+			return nil, err
+		}
+		resp = append(resp, modelResp)
 	}
 	return resp, nil
 }
@@ -1129,7 +1194,7 @@ func (s *aiChatConfigService) SaveImageModel(ctx context.Context, id int, req *s
 	if err := s.repo.SaveImageModel(ctx, model); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
-	return s.formatImageModel(ctx, model), nil
+	return s.formatImageModel(ctx, model)
 }
 
 func (s *aiChatConfigService) DeleteImageModel(ctx context.Context, id int) error {
@@ -1206,6 +1271,41 @@ func (s *aiChatConfigService) ResolveImageAgentUpstream(ctx context.Context, sit
 	}, nil
 }
 
+func (s *aiChatConfigService) CheckImageQuota(ctx context.Context, userID string, count int) error {
+	if err := s.ensureImageTables(ctx); err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if userID == "" {
+		return errors.Unauthorized(reason.UnauthorizedError)
+	}
+	if count <= 0 {
+		count = 1
+	}
+	user, exist, err := s.userRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if !exist || user == nil {
+		return errors.BadRequest(reason.UserNotFound)
+	}
+	plan, _, err := s.getEffectiveUserPlan(ctx, user)
+	if err != nil {
+		return err
+	}
+	if plan.ImageQuota == -1 {
+		return nil
+	}
+	monthStart, monthEnd := currentMonthRange()
+	used, err := s.repo.CountUserImageGenerations(ctx, userID, monthStart, monthEnd)
+	if err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if used+count > plan.ImageQuota {
+		return errors.BadRequest("image quota is insufficient")
+	}
+	return nil
+}
+
 func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, req *schema.AIImageGenerateReq) (*schema.AIImageGenerateResp, error) {
 	if err := s.ensureImageTables(ctx); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
@@ -1234,16 +1334,6 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 	plan, _, err := s.getEffectiveUserPlan(ctx, user)
 	if err != nil {
 		return nil, err
-	}
-	if plan.ImageQuota != -1 {
-		monthStart, monthEnd := currentMonthRange()
-		used, err := s.repo.CountUserImageGenerations(ctx, userID, monthStart, monthEnd)
-		if err != nil {
-			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
-		}
-		if used+req.Count > plan.ImageQuota {
-			return nil, errors.BadRequest("image quota is insufficient")
-		}
 	}
 	model, exist, err := s.repo.GetImageModelBySiteModelID(ctx, req.Model)
 	if err != nil {
@@ -1301,8 +1391,12 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 		Status:          "generating",
 		ExpiresAt:       expiresAt,
 	}
-	if err := s.repo.CreateImageGeneration(runCtx, record); err != nil {
+	monthStart, monthEnd := currentMonthRange()
+	if err := s.repo.CreateImageGenerationWithQuota(runCtx, record, plan.ImageQuota, monthStart, monthEnd); err != nil {
 		log.Errorf("ai image generation pending record failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+		if stderrors.Is(err, ai_chat_config_repo.ErrQuotaInsufficient) {
+			return nil, errors.BadRequest("image quota is insufficient")
+		}
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
 	log.Infof(
@@ -1382,16 +1476,6 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 	if err != nil {
 		return err
 	}
-	if plan.ImageQuota != -1 {
-		monthStart, monthEnd := currentMonthRange()
-		used, err := s.repo.CountUserImageGenerations(ctx, userID, monthStart, monthEnd)
-		if err != nil {
-			return errors.InternalServer(reason.DatabaseError).WithError(err)
-		}
-		if used+req.Count > plan.ImageQuota {
-			return errors.BadRequest("image quota is insufficient")
-		}
-	}
 	model, exist, err := s.repo.GetImageModelBySiteModelID(ctx, req.Model)
 	if err != nil {
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
@@ -1452,7 +1536,11 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 		Status:          "generating",
 		ExpiresAt:       expiresAt,
 	}
-	if err := s.repo.CreateImageGeneration(runCtx, record); err != nil {
+	monthStart, monthEnd := currentMonthRange()
+	if err := s.repo.CreateImageGenerationWithQuota(runCtx, record, plan.ImageQuota, monthStart, monthEnd); err != nil {
+		if stderrors.Is(err, ai_chat_config_repo.ErrQuotaInsufficient) {
+			return errors.BadRequest("image quota is insufficient")
+		}
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
 
@@ -1793,6 +1881,10 @@ func (s *aiChatConfigService) SaveAgentImageGeneration(ctx context.Context, user
 	if !exist || user == nil {
 		return nil, errors.BadRequest(reason.UserNotFound)
 	}
+	plan, _, err := s.getEffectiveUserPlan(ctx, user)
+	if err != nil {
+		return nil, err
+	}
 	model, exist, err := s.repo.GetImageModelBySiteModelID(ctx, req.Model)
 	if err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
@@ -1836,7 +1928,7 @@ func (s *aiChatConfigService) SaveAgentImageGeneration(ctx context.Context, user
 			err  error
 		)
 		if strings.HasPrefix(strings.ToLower(rawImage), "http://") || strings.HasPrefix(strings.ToLower(rawImage), "https://") {
-			data, ext, err = downloadImage(runCtx, rawImage)
+			data, ext, err = downloadImage(runCtx, rawImage, imageDownloadOptions{})
 		} else {
 			data, ext, err = decodeImageData(rawImage)
 		}
@@ -1884,8 +1976,12 @@ func (s *aiChatConfigService) SaveAgentImageGeneration(ctx context.Context, user
 		Status:          "completed",
 		ExpiresAt:       expiresAt,
 	}
-	if err := s.repo.CreateImageGeneration(runCtx, record); err != nil {
+	monthStart, monthEnd := currentMonthRange()
+	if err := s.repo.CreateImageGenerationWithQuota(runCtx, record, plan.ImageQuota, monthStart, monthEnd); err != nil {
 		log.Errorf("ai agent image generation record failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+		if stderrors.Is(err, ai_chat_config_repo.ErrQuotaInsufficient) {
+			return nil, errors.BadRequest("image quota is insufficient")
+		}
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
 	log.Infof("ai agent image generation saved generation_id=%s user_id=%s image_count=%d", generationID, userID, len(imageURLs))
@@ -2071,7 +2167,7 @@ func (s *aiChatConfigService) CreateVideoProvider(ctx context.Context, req *sche
 	if strings.TrimSpace(req.APIKey) == "" {
 		return nil, errors.BadRequest("api_key is required")
 	}
-	baseURL, err := normalizeBaseURL(req.BaseURL)
+	baseURL, err := normalizeProviderBaseURL(ctx, req.BaseURL)
 	if err != nil {
 		return nil, errors.BadRequest("base_url is invalid")
 	}
@@ -2099,7 +2195,7 @@ func (s *aiChatConfigService) UpdateVideoProvider(ctx context.Context, id int, r
 	if !exist {
 		return nil, errors.BadRequest(reason.ObjectNotFound)
 	}
-	baseURL, err := normalizeBaseURL(req.BaseURL)
+	baseURL, err := normalizeProviderBaseURL(ctx, req.BaseURL)
 	if err != nil {
 		return nil, errors.BadRequest("base_url is invalid")
 	}
@@ -2122,6 +2218,13 @@ func (s *aiChatConfigService) DeleteVideoProvider(ctx context.Context, id int) e
 	if err := s.ensureVideoTables(ctx); err != nil {
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
+	count, err := s.repo.CountVideoModelsByProvider(ctx, id)
+	if err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if count > 0 {
+		return errors.BadRequest("provider is still used by video models")
+	}
 	if err := s.repo.DeleteVideoProvider(ctx, id); err != nil {
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
@@ -2138,7 +2241,11 @@ func (s *aiChatConfigService) ListVideoModels(ctx context.Context, onlyEnabled b
 	}
 	resp := make([]*schema.AIVideoModelResp, 0, len(models))
 	for _, model := range models {
-		resp = append(resp, s.formatVideoModel(ctx, model))
+		modelResp, err := s.formatVideoModel(ctx, model)
+		if err != nil {
+			return nil, err
+		}
+		resp = append(resp, modelResp)
 	}
 	return resp, nil
 }
@@ -2204,7 +2311,7 @@ func (s *aiChatConfigService) SaveVideoModel(ctx context.Context, id int, req *s
 	if err := s.repo.SaveVideoModel(ctx, model); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
-	return s.formatVideoModel(ctx, model), nil
+	return s.formatVideoModel(ctx, model)
 }
 
 func (s *aiChatConfigService) DeleteVideoModel(ctx context.Context, id int) error {
@@ -2268,9 +2375,6 @@ func (s *aiChatConfigService) GenerateVideo(ctx context.Context, userID string, 
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkVideoQuota(ctx, userID, plan); err != nil {
-		return nil, err
-	}
 	model, exist, err := s.repo.GetVideoModelBySiteModelID(ctx, req.Model)
 	if err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
@@ -2323,12 +2427,20 @@ func (s *aiChatConfigService) GenerateVideo(ctx context.Context, userID string, 
 		Seconds:         req.Seconds,
 		Preset:          req.Preset,
 		ReferenceImages: string(referenceImages),
-		Status:          "queued",
+		Status:          entity.AIVideoStatusQueued,
 		Progress:        0,
 		ExpiresAt:       expiresAt,
 	}
-	if err := s.repo.CreateVideoGeneration(runCtx, record); err != nil {
+	dayStart, dayEnd := currentDayRange()
+	monthStart, monthEnd := currentMonthRange()
+	if err := s.repo.CreateVideoGenerationWithQuota(runCtx, record, plan.VideoDailyQuota, plan.VideoQuota, dayStart, dayEnd, monthStart, monthEnd); err != nil {
 		log.Errorf("ai video generation pending record failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+		if stderrors.Is(err, ai_chat_config_repo.ErrVideoDailyQuotaInsufficient) {
+			return nil, errors.BadRequest("today video quota is insufficient")
+		}
+		if stderrors.Is(err, ai_chat_config_repo.ErrVideoMonthlyQuotaInsufficient) {
+			return nil, errors.BadRequest("monthly video quota is insufficient")
+		}
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
 	log.Infof(
@@ -2430,6 +2542,23 @@ func (s *aiChatConfigService) validatePlanReq(ctx context.Context, excludeID int
 	if len(req.ModelMappingIDs) == 0 {
 		return errors.BadRequest("at least one available model is required")
 	}
+	modelMappingIDs := make(map[int]bool, len(req.ModelMappingIDs))
+	for _, modelMappingID := range req.ModelMappingIDs {
+		if modelMappingID <= 0 {
+			return errors.BadRequest("model_mapping_ids contains invalid model")
+		}
+		if modelMappingIDs[modelMappingID] {
+			return errors.BadRequest("model_mapping_ids contains duplicate model")
+		}
+		modelMappingIDs[modelMappingID] = true
+		mapping, exist, err := s.repo.GetModelMapping(ctx, modelMappingID)
+		if err != nil {
+			return errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
+		if !exist || !mapping.Enabled {
+			return errors.BadRequest("model_mapping_ids contains unavailable model")
+		}
+	}
 	count, err := s.repo.CountCustomSubscriptionPlans(ctx, excludeID)
 	if err != nil {
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
@@ -2476,11 +2605,15 @@ func (s *aiChatConfigService) formatProviderModels(models []*entity.AIProviderMo
 	return resp
 }
 
-func (s *aiChatConfigService) formatMapping(ctx context.Context, mapping *entity.AIModelMapping, items []*entity.AIModelMappingItem) *schema.AIModelMappingResp {
+func (s *aiChatConfigService) formatMapping(ctx context.Context, mapping *entity.AIModelMapping, items []*entity.AIModelMappingItem) (*schema.AIModelMappingResp, error) {
 	respItems := make([]*schema.AIModelMappingItemResp, 0, len(items))
 	for _, item := range items {
 		providerName := ""
-		if provider, exist, _ := s.repo.GetProvider(ctx, item.ProviderID); exist {
+		provider, exist, err := s.repo.GetProvider(ctx, item.ProviderID)
+		if err != nil {
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
+		if exist {
 			providerName = provider.Name
 		}
 		respItems = append(respItems, &schema.AIModelMappingItemResp{
@@ -2508,16 +2641,23 @@ func (s *aiChatConfigService) formatMapping(ctx context.Context, mapping *entity
 		Items:                  respItems,
 		CreatedAt:              mapping.CreatedAt.Unix(),
 		UpdatedAt:              mapping.UpdatedAt.Unix(),
-	}
+	}, nil
 }
 
-func (s *aiChatConfigService) formatPlan(ctx context.Context, plan *entity.AISubscriptionPlan) *schema.AISubscriptionPlanResp {
-	relations, _ := s.repo.ListSubscriptionPlanModels(ctx, plan.ID)
+func (s *aiChatConfigService) formatPlan(ctx context.Context, plan *entity.AISubscriptionPlan) (*schema.AISubscriptionPlanResp, error) {
+	relations, err := s.repo.ListSubscriptionPlanModels(ctx, plan.ID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
 	modelIDs := make([]int, 0, len(relations))
 	siteModelIDs := make([]string, 0, len(relations))
 	for _, rel := range relations {
 		modelIDs = append(modelIDs, rel.ModelMappingID)
-		if mapping, exist, _ := s.repo.GetModelMapping(ctx, rel.ModelMappingID); exist {
+		mapping, exist, err := s.repo.GetModelMapping(ctx, rel.ModelMappingID)
+		if err != nil {
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
+		if exist {
 			siteModelIDs = append(siteModelIDs, mapping.SiteModelID)
 		}
 	}
@@ -2538,7 +2678,7 @@ func (s *aiChatConfigService) formatPlan(ctx context.Context, plan *entity.AISub
 		SortOrder:         plan.SortOrder,
 		CreatedAt:         plan.CreatedAt.Unix(),
 		UpdatedAt:         plan.UpdatedAt.Unix(),
-	}
+	}, nil
 }
 
 func (s *aiChatConfigService) formatRedeemCode(ctx context.Context, code *entity.AISubscriptionRedeemCode) *schema.AISubscriptionRedeemCodeResp {
@@ -2566,9 +2706,13 @@ func (s *aiChatConfigService) formatRedeemCode(ctx context.Context, code *entity
 	}
 }
 
-func (s *aiChatConfigService) formatRate(ctx context.Context, rate *entity.AIModelConsumeRate) *schema.AIModelConsumeRateResp {
+func (s *aiChatConfigService) formatRate(ctx context.Context, rate *entity.AIModelConsumeRate) (*schema.AIModelConsumeRateResp, error) {
 	siteModelID := ""
-	if mapping, exist, _ := s.repo.GetModelMapping(ctx, rate.ModelMappingID); exist {
+	mapping, exist, err := s.repo.GetModelMapping(ctx, rate.ModelMappingID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if exist {
 		siteModelID = mapping.SiteModelID
 	}
 	return &schema.AIModelConsumeRateResp{
@@ -2580,7 +2724,7 @@ func (s *aiChatConfigService) formatRate(ctx context.Context, rate *entity.AIMod
 		Remark:         rate.Remark,
 		CreatedAt:      rate.CreatedAt.Unix(),
 		UpdatedAt:      rate.UpdatedAt.Unix(),
-	}
+	}, nil
 }
 
 func (s *aiChatConfigService) formatImageProvider(provider *entity.AIImageProvider, mask bool) *schema.AIImageProviderResp {
@@ -2600,12 +2744,19 @@ func (s *aiChatConfigService) formatImageProvider(provider *entity.AIImageProvid
 	}
 }
 
-func (s *aiChatConfigService) formatImageModel(ctx context.Context, model *entity.AIImageModel) *schema.AIImageModelResp {
+func (s *aiChatConfigService) formatImageModel(ctx context.Context, model *entity.AIImageModel) (*schema.AIImageModelResp, error) {
 	providerName := ""
-	if provider, exist, _ := s.repo.GetImageProvider(ctx, model.ProviderID); exist {
+	provider, exist, err := s.repo.GetImageProvider(ctx, model.ProviderID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if exist {
 		providerName = provider.Name
 	}
-	upstreams := s.formatImageModelUpstreams(ctx, model)
+	upstreams, err := s.formatImageModelUpstreams(ctx, model)
+	if err != nil {
+		return nil, err
+	}
 	return &schema.AIImageModelResp{
 		ID:              model.ID,
 		ProviderID:      model.ProviderID,
@@ -2628,7 +2779,7 @@ func (s *aiChatConfigService) formatImageModel(ctx context.Context, model *entit
 		CreatedAt:       model.CreatedAt.Unix(),
 		UpdatedAt:       model.UpdatedAt.Unix(),
 		Upstreams:       upstreams,
-	}
+	}, nil
 }
 
 func (s *aiChatConfigService) formatImageSetting(setting *entity.AIImageSetting) *schema.AIImageSettingResp {
@@ -2705,9 +2856,13 @@ func (s *aiChatConfigService) formatVideoProvider(provider *entity.AIVideoProvid
 	}
 }
 
-func (s *aiChatConfigService) formatVideoModel(ctx context.Context, model *entity.AIVideoModel) *schema.AIVideoModelResp {
+func (s *aiChatConfigService) formatVideoModel(ctx context.Context, model *entity.AIVideoModel) (*schema.AIVideoModelResp, error) {
 	providerName := ""
-	if provider, exist, _ := s.repo.GetVideoProvider(ctx, model.ProviderID); exist {
+	provider, exist, err := s.repo.GetVideoProvider(ctx, model.ProviderID)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if exist {
 		providerName = provider.Name
 	}
 	return &schema.AIVideoModelResp{
@@ -2726,7 +2881,7 @@ func (s *aiChatConfigService) formatVideoModel(ctx context.Context, model *entit
 		SortOrder:         model.SortOrder,
 		CreatedAt:         model.CreatedAt.Unix(),
 		UpdatedAt:         model.UpdatedAt.Unix(),
-	}
+	}, nil
 }
 
 func (s *aiChatConfigService) formatVideoSetting(setting *entity.AIVideoSetting) *schema.AIVideoSettingResp {
@@ -2819,7 +2974,7 @@ func (s *aiChatConfigService) callAndSaveImages(
 		payload["background"] = req.Background
 	}
 	if normalizeImageAPIMode(model.APIMode) == "responses" {
-		preparedImages, err := prepareReferenceImages(ctx, req.ReferenceImages)
+		preparedImages, err := prepareReferenceImages(ctx, req.ReferenceImages, referenceImageOptions{})
 		if err != nil {
 			log.Errorf("ai image reference prepare failed generation_id=%s error=%v", generationID, err)
 			return nil, err
@@ -2834,7 +2989,7 @@ func (s *aiChatConfigService) callAndSaveImages(
 			return nil, fmt.Errorf("image model does not support reference images")
 		}
 		log.Infof("ai image preparing references generation_id=%s raw_reference_count=%d", generationID, len(req.ReferenceImages))
-		preparedImages, err := prepareReferenceImages(ctx, req.ReferenceImages)
+		preparedImages, err := prepareReferenceImages(ctx, req.ReferenceImages, referenceImageOptions{})
 		if err != nil {
 			log.Errorf("ai image reference prepare failed generation_id=%s error=%v", generationID, err)
 			return nil, err
@@ -2874,6 +3029,19 @@ type preparedReferenceImage struct {
 	MIME    string
 	Ext     string
 	DataURL string
+}
+
+type referenceImageOptions struct {
+	MaxCount       int
+	MaxBytes       int64
+	RequireHTTPS   bool
+	BlockPrivateIP bool
+}
+
+type imageDownloadOptions struct {
+	MaxBytes       int64
+	RequireHTTPS   bool
+	BlockPrivateIP bool
 }
 
 func (s *aiChatConfigService) callAndSaveImagesWithReferences(
@@ -3138,7 +3306,7 @@ func (s *aiChatConfigService) saveImageAPIResponse(ctx context.Context, userID, 
 				return nil, err
 			}
 		} else if item.URL != "" {
-			data, ext, err = downloadImage(ctx, item.URL)
+			data, ext, err = downloadImage(ctx, item.URL, imageDownloadOptions{})
 			if err != nil {
 				log.Errorf("ai image response image download failed generation_id=%s index=%d error=%v", generationID, i, err)
 				return nil, err
@@ -3182,7 +3350,7 @@ func (s *aiChatConfigService) saveGeneratedImage(userID, generationID string, in
 func (s *aiChatConfigService) runVideoGeneration(ctx context.Context, provider *entity.AIVideoProvider, model *entity.AIVideoModel, generationID, userID string, req *schema.AIVideoGenerateReq) {
 	log.Infof("ai video generation start generation_id=%s user_id=%s provider=%s provider_model=%s", generationID, userID, provider.Name, model.ProviderModelID)
 	if err := s.repo.UpdateVideoGeneration(ctx, generationID, &entity.AIVideoGeneration{
-		Status:   "in_progress",
+		Status:   entity.AIVideoStatusInProgress,
 		Progress: 1,
 	}, "status", "progress"); err != nil {
 		log.Errorf("ai video generation start status update failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
@@ -3191,7 +3359,7 @@ func (s *aiChatConfigService) runVideoGeneration(ctx context.Context, provider *
 	if err != nil {
 		log.Errorf("ai video upstream create failed generation_id=%s user_id=%s provider=%s provider_model=%s error=%v", generationID, userID, provider.Name, model.ProviderModelID, err)
 		if updateErr := s.repo.UpdateVideoGeneration(ctx, generationID, &entity.AIVideoGeneration{
-			Status: "failed",
+			Status: entity.AIVideoStatusFailed,
 			Error:  err.Error(),
 		}, "status", "error"); updateErr != nil {
 			log.Errorf("ai video generation failed status update failed generation_id=%s user_id=%s error=%v", generationID, userID, updateErr)
@@ -3209,7 +3377,7 @@ func (s *aiChatConfigService) runVideoGeneration(ctx context.Context, provider *
 	if err != nil {
 		log.Errorf("ai video generation failed generation_id=%s user_id=%s upstream_id=%s error=%v", generationID, userID, upstreamID, err)
 		if updateErr := s.repo.UpdateVideoGeneration(ctx, generationID, &entity.AIVideoGeneration{
-			Status: "failed",
+			Status: entity.AIVideoStatusFailed,
 			Error:  err.Error(),
 		}, "status", "error"); updateErr != nil {
 			log.Errorf("ai video generation failed status update failed generation_id=%s user_id=%s error=%v", generationID, userID, updateErr)
@@ -3218,7 +3386,7 @@ func (s *aiChatConfigService) runVideoGeneration(ctx context.Context, provider *
 	}
 	if err := s.repo.UpdateVideoGeneration(ctx, generationID, &entity.AIVideoGeneration{
 		VideoURL: videoURL,
-		Status:   "completed",
+		Status:   entity.AIVideoStatusCompleted,
 		Progress: 100,
 		Error:    "",
 	}, "video_url", "status", "progress", "error"); err != nil {
@@ -3231,8 +3399,7 @@ func (s *aiChatConfigService) runVideoGeneration(ctx context.Context, provider *
 func (s *aiChatConfigService) createUpstreamVideo(ctx context.Context, provider *entity.AIVideoProvider, model *entity.AIVideoModel, generationID string, req *schema.AIVideoGenerateReq) (string, error) {
 	baseURL := strings.TrimRight(provider.BaseURL, "/")
 	log.Infof("ai video upstream request generation_id=%s endpoint=%s model=%s size=%s seconds=%d quality=%s preset=%s references=%d", generationID, "/videos", model.ProviderModelID, req.Size, req.Seconds, req.Quality, req.Preset, len(req.ReferenceImages))
-	request := resty.New().
-		SetRetryCount(1).
+	request := newVideoRestyClient(videoCreateTimeout).
 		SetHeader("Authorization", fmt.Sprintf("Bearer %s", provider.APIKey)).
 		R().
 		SetContext(ctx).
@@ -3244,7 +3411,12 @@ func (s *aiChatConfigService) createUpstreamVideo(ctx context.Context, provider 
 			"resolution_name": req.Quality,
 			"preset":          req.Preset,
 		})
-	preparedImages, err := prepareReferenceImages(ctx, req.ReferenceImages)
+	preparedImages, err := prepareReferenceImages(ctx, req.ReferenceImages, referenceImageOptions{
+		MaxCount:       videoReferenceImageMaxCount,
+		MaxBytes:       videoReferenceImageMaxBytes,
+		RequireHTTPS:   true,
+		BlockPrivateIP: true,
+	})
 	if err != nil {
 		log.Errorf("ai video reference prepare failed generation_id=%s error=%v", generationID, err)
 		return "", err
@@ -3281,7 +3453,7 @@ func (s *aiChatConfigService) createUpstreamVideo(ctx context.Context, provider 
 
 func (s *aiChatConfigService) waitAndSaveUpstreamVideo(ctx context.Context, provider *entity.AIVideoProvider, generationID, upstreamID, userID string) (string, error) {
 	baseURL := strings.TrimRight(provider.BaseURL, "/")
-	client := resty.New().SetRetryCount(1)
+	client := newVideoRestyClient(videoStatusTimeout)
 	deadline := time.Now().Add(12 * time.Minute)
 	lastStatus := ""
 	lastProgress := -1
@@ -3312,8 +3484,8 @@ func (s *aiChatConfigService) waitAndSaveUpstreamVideo(ctx context.Context, prov
 		progress := max(1, min(99, status.Progress))
 		normalizedStatus := normalizeVideoStatus(status.Status)
 		recordStatus := normalizedStatus
-		if status.Status == "completed" {
-			recordStatus = "in_progress"
+		if status.Status == entity.AIVideoStatusCompleted {
+			recordStatus = entity.AIVideoStatusInProgress
 			progress = 99
 		}
 		if normalizedStatus != lastStatus || progress != lastProgress {
@@ -3327,7 +3499,7 @@ func (s *aiChatConfigService) waitAndSaveUpstreamVideo(ctx context.Context, prov
 		}, "status", "progress"); err != nil {
 			log.Errorf("ai video progress update failed generation_id=%s upstream_id=%s status=%s progress=%d error=%v", generationID, upstreamID, recordStatus, progress, err)
 		}
-		if status.Status == "completed" {
+		if status.Status == entity.AIVideoStatusCompleted {
 			raw, err := s.downloadUpstreamVideo(ctx, provider, upstreamID)
 			if err != nil {
 				log.Errorf("ai video download failed generation_id=%s upstream_id=%s error=%v", generationID, upstreamID, err)
@@ -3335,7 +3507,7 @@ func (s *aiChatConfigService) waitAndSaveUpstreamVideo(ctx context.Context, prov
 			}
 			return s.saveGeneratedVideo(userID, generationID, raw)
 		}
-		if status.Status == "failed" {
+		if status.Status == entity.AIVideoStatusFailed {
 			if status.Error.Message != "" {
 				return "", fmt.Errorf("%s", status.Error.Message)
 			}
@@ -3352,8 +3524,7 @@ func (s *aiChatConfigService) waitAndSaveUpstreamVideo(ctx context.Context, prov
 }
 
 func (s *aiChatConfigService) downloadUpstreamVideo(ctx context.Context, provider *entity.AIVideoProvider, upstreamID string) ([]byte, error) {
-	resp, err := resty.New().
-		SetRetryCount(1).
+	resp, err := newVideoRestyClient(videoContentTimeout).
 		SetHeader("Authorization", fmt.Sprintf("Bearer %s", provider.APIKey)).
 		R().
 		SetContext(ctx).
@@ -3522,15 +3693,33 @@ func unixOrZero(value time.Time) int64 {
 }
 
 func currentMonthRange() (time.Time, time.Time) {
-	now := time.Now()
+	return monthRange(time.Now())
+}
+
+func monthRange(now time.Time) (time.Time, time.Time) {
 	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	return start, start.AddDate(0, 1, 0)
 }
 
 func currentDayRange() (time.Time, time.Time) {
-	now := time.Now()
+	return dayRange(time.Now())
+}
+
+func dayRange(now time.Time) (time.Time, time.Time) {
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	return start, start.AddDate(0, 0, 1)
+}
+
+func subscriptionRedeemRange(user *entity.User, targetPlanID string, now time.Time) (time.Time, time.Time) {
+	startAt := now
+	baseAt := now
+	if user != nil && user.SubscriptionLevel == targetPlanID && !user.SubscriptionExpiresAt.IsZero() && user.SubscriptionExpiresAt.After(now) {
+		baseAt = user.SubscriptionExpiresAt
+		if !user.SubscriptionStartedAt.IsZero() {
+			startAt = user.SubscriptionStartedAt
+		}
+	}
+	return startAt, baseAt
 }
 
 func fallbackText(value, fallback string) string {
@@ -3578,9 +3767,31 @@ func normalizeBaseURL(raw string) (string, error) {
 	return raw, nil
 }
 
+func normalizeProviderBaseURL(ctx context.Context, raw string) (string, error) {
+	normalized, err := normalizeBaseURL(raw)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("base_url scheme is not allowed")
+	}
+	if err := validatePublicImageHost(ctx, parsed.Hostname()); err != nil {
+		return "", err
+	}
+	return normalized, nil
+}
+
+func newAdminAIConfigClient(timeout time.Duration) *resty.Client {
+	return resty.New().SetRetryCount(1).SetTimeout(timeout)
+}
+
 func fetchOpenAIModels(baseURL, apiKey string) ([]string, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
-	resp, err := resty.New().
+	resp, err := newAdminAIConfigClient(adminAIConfigFetchTimeout).
 		SetHeader("Authorization", fmt.Sprintf("Bearer %s", apiKey)).
 		SetHeader("Content-Type", "application/json").
 		R().
@@ -3589,7 +3800,7 @@ func fetchOpenAIModels(baseURL, apiKey string) ([]string, error) {
 		return nil, err
 	}
 	if !resp.IsSuccess() {
-		return nil, fmt.Errorf("status %d: %s", resp.StatusCode(), resp.String())
+		return nil, safeUpstreamError(resp.StatusCode(), resp.Body())
 	}
 	payload := &schema.GetAIModelsResp{}
 	if err := json.Unmarshal(resp.Body(), payload); err != nil {
@@ -3616,7 +3827,7 @@ func testOpenAIChat(baseURL, apiKey, modelID string) (message, raw string, err e
 		},
 		"stream": false,
 	}
-	resp, err := resty.New().
+	resp, err := newAdminAIConfigClient(adminAIConfigTestTimeout).
 		SetHeader("Authorization", fmt.Sprintf("Bearer %s", apiKey)).
 		SetHeader("Content-Type", "application/json").
 		R().
@@ -3625,9 +3836,9 @@ func testOpenAIChat(baseURL, apiKey, modelID string) (message, raw string, err e
 	if err != nil {
 		return "", "", err
 	}
-	raw = resp.String()
+	raw = safeUpstreamResponse(resp.Body())
 	if !resp.IsSuccess() {
-		return "", raw, fmt.Errorf("status %d: %s", resp.StatusCode(), raw)
+		return "", raw, safeUpstreamError(resp.StatusCode(), resp.Body())
 	}
 	var parsed struct {
 		Choices []struct {
@@ -3646,6 +3857,21 @@ func testOpenAIChat(baseURL, apiKey, modelID string) (message, raw string, err e
 		message = raw
 	}
 	return message, raw, nil
+}
+
+func safeUpstreamResponse(body []byte) string {
+	text := responseSnippet(body)
+	text = bearerTokenPattern.ReplaceAllString(text, "Bearer <redacted>")
+	text = secretJSONPattern.ReplaceAllString(text, `"$1":"<redacted>"`)
+	return text
+}
+
+func safeUpstreamError(status int, body []byte) error {
+	summary := safeUpstreamResponse(body)
+	if summary == "" {
+		return fmt.Errorf("status %d", status)
+	}
+	return fmt.Errorf("status %d: %s", status, summary)
 }
 
 func buildImagePrompt(req *schema.AIImageGenerateReq) string {
@@ -3914,12 +4140,16 @@ func imageModelExtraConfigWithOverrides(raw, agentModelID, responsesModelID stri
 	return string(body)
 }
 
-func (s *aiChatConfigService) formatImageModelUpstreams(ctx context.Context, model *entity.AIImageModel) []schema.AIImageModelUpstreamResp {
+func (s *aiChatConfigService) formatImageModelUpstreams(ctx context.Context, model *entity.AIImageModel) ([]schema.AIImageModelUpstreamResp, error) {
 	configs := getImageModelUpstreamConfigs(model)
 	resp := make([]schema.AIImageModelUpstreamResp, 0, len(configs))
 	for _, cfg := range configs {
 		providerName := ""
-		if provider, exist, _ := s.repo.GetImageProvider(ctx, cfg.ProviderID); exist {
+		provider, exist, err := s.repo.GetImageProvider(ctx, cfg.ProviderID)
+		if err != nil {
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
+		if exist {
 			providerName = provider.Name
 		}
 		weight := cfg.Weight
@@ -3936,7 +4166,7 @@ func (s *aiChatConfigService) formatImageModelUpstreams(ctx context.Context, mod
 			Enabled:          imageModelUpstreamEnabled(cfg),
 		})
 	}
-	return resp
+	return resp, nil
 }
 
 func getImageResponsesModelID(model *entity.AIImageModel) string {
@@ -4181,55 +4411,38 @@ func videoAspectRatio(size string) string {
 
 func normalizeVideoStatus(status string) string {
 	switch strings.TrimSpace(status) {
-	case "queued", "in_progress", "completed", "failed":
+	case entity.AIVideoStatusQueued, entity.AIVideoStatusInProgress, entity.AIVideoStatusCompleted, entity.AIVideoStatusFailed:
 		return status
 	default:
-		return "in_progress"
+		return entity.AIVideoStatusInProgress
 	}
 }
 
-func (s *aiChatConfigService) checkVideoQuota(ctx context.Context, userID string, plan *entity.AISubscriptionPlan) error {
-	if plan.VideoDailyQuota == -1 && plan.VideoQuota == -1 {
-		return nil
-	}
-	dayStart, dayEnd := currentDayRange()
-	monthStart, monthEnd := currentMonthRange()
-	if plan.VideoDailyQuota != -1 {
-		used, err := s.repo.CountUserVideoGenerations(ctx, userID, dayStart, dayEnd)
-		if err != nil {
-			return errors.InternalServer(reason.DatabaseError).WithError(err)
-		}
-		if used+1 > plan.VideoDailyQuota {
-			return errors.BadRequest("daily video quota is insufficient")
-		}
-	}
-	if plan.VideoQuota != -1 {
-		used, err := s.repo.CountUserVideoGenerations(ctx, userID, monthStart, monthEnd)
-		if err != nil {
-			return errors.InternalServer(reason.DatabaseError).WithError(err)
-		}
-		if used+1 > plan.VideoQuota {
-			return errors.BadRequest("monthly video quota is insufficient")
-		}
-	}
-	return nil
-}
-
-func prepareReferenceImages(ctx context.Context, rawImages []string) ([]*preparedReferenceImage, error) {
+func prepareReferenceImages(ctx context.Context, rawImages []string, opts referenceImageOptions) ([]*preparedReferenceImage, error) {
 	images := make([]*preparedReferenceImage, 0, len(rawImages))
 	for _, rawImage := range rawImages {
 		rawImage = strings.TrimSpace(rawImage)
 		if rawImage == "" {
 			continue
 		}
+		if opts.MaxCount > 0 && len(images) >= opts.MaxCount {
+			return nil, fmt.Errorf("reference images cannot be greater than %d", opts.MaxCount)
+		}
 		if strings.HasPrefix(rawImage, "http://") || strings.HasPrefix(rawImage, "https://") {
-			data, ext, err := downloadImage(ctx, rawImage)
+			data, ext, err := downloadImage(ctx, rawImage, imageDownloadOptions{
+				MaxBytes:       opts.MaxBytes,
+				RequireHTTPS:   opts.RequireHTTPS,
+				BlockPrivateIP: opts.BlockPrivateIP,
+			})
 			if err != nil {
 				return nil, err
 			}
 			mimeType := mime.TypeByExtension(ext)
 			if mimeType == "" {
 				mimeType = "image/png"
+			}
+			if !strings.HasPrefix(mimeType, "image/") {
+				return nil, fmt.Errorf("reference image is not an image")
 			}
 			images = append(images, &preparedReferenceImage{
 				Data:    data,
@@ -4250,7 +4463,11 @@ func prepareReferenceImages(ctx context.Context, rawImages []string) ([]*prepare
 		if !strings.HasPrefix(mimeType, "image/") {
 			return nil, fmt.Errorf("reference image is not an image")
 		}
-		if len(data) > 20*1024*1024 {
+		maxBytes := opts.MaxBytes
+		if maxBytes <= 0 {
+			maxBytes = defaultImageDownloadMaxBytes
+		}
+		if int64(len(data)) > maxBytes {
 			return nil, fmt.Errorf("reference image is too large")
 		}
 		images = append(images, &preparedReferenceImage{
@@ -4261,6 +4478,10 @@ func prepareReferenceImages(ctx context.Context, rawImages []string) ([]*prepare
 		})
 	}
 	return images, nil
+}
+
+func newVideoRestyClient(timeout time.Duration) *resty.Client {
+	return resty.New().SetRetryCount(1).SetTimeout(timeout)
 }
 
 func summarizeReferenceImages(images []*preparedReferenceImage) string {
@@ -4348,12 +4569,49 @@ func decodeImageData(value string) ([]byte, string, error) {
 	return data, ".png", nil
 }
 
-func downloadImage(ctx context.Context, rawURL string) ([]byte, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+func downloadImage(ctx context.Context, rawURL string, opts imageDownloadOptions) ([]byte, string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return nil, "", err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, "", fmt.Errorf("image url scheme is not supported")
+	}
+	if opts.RequireHTTPS && parsed.Scheme != "https" {
+		return nil, "", fmt.Errorf("image url must use https")
+	}
+	if opts.BlockPrivateIP {
+		if err := validatePublicImageHost(ctx, parsed.Hostname()); err != nil {
+			return nil, "", err
+		}
+	}
+	maxBytes := opts.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultImageDownloadMaxBytes
+	}
+	client := &http.Client{
+		Timeout: imageDownloadTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			next := req.URL
+			if opts.RequireHTTPS && next.Scheme != "https" {
+				return fmt.Errorf("image url must use https")
+			}
+			if opts.BlockPrivateIP {
+				if err := validatePublicImageHost(ctx, next.Hostname()); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -4361,17 +4619,64 @@ func downloadImage(ctx context.Context, rawURL string) ([]byte, string, error) {
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, "", fmt.Errorf("download status %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 20*1024*1024))
+	contentType := strings.Split(resp.Header.Get("Content-Type"), ";")[0]
+	contentType = strings.TrimSpace(strings.ToLower(contentType))
+	if contentType != "" && !strings.HasPrefix(contentType, "image/") {
+		return nil, "", fmt.Errorf("downloaded file is not an image")
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return nil, "", err
 	}
+	if int64(len(data)) > maxBytes {
+		return nil, "", fmt.Errorf("reference image is too large")
+	}
 	ext := ".png"
-	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+	if contentType != "" {
 		if exts, _ := mime.ExtensionsByType(contentType); len(exts) > 0 {
 			ext = exts[0]
 		}
 	}
 	return data, ext, nil
+}
+
+func validatePublicImageHost(ctx context.Context, host string) error {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return fmt.Errorf("image url host is required")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isPrivateOrLocalIP(ip) {
+			return fmt.Errorf("image url host is not allowed")
+		}
+		return nil
+	}
+	resolver := net.DefaultResolver
+	ips, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return err
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("image url host cannot be resolved")
+	}
+	for _, resolved := range ips {
+		if isPrivateOrLocalIP(resolved.IP) {
+			return fmt.Errorf("image url host is not allowed")
+		}
+	}
+	return nil
+}
+
+func isPrivateOrLocalIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() ||
+		ip.IsMulticast()
 }
 
 func maskSecret(secret string) string {

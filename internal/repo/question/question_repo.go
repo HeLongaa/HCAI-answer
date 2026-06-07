@@ -465,9 +465,15 @@ func (qr *questionRepo) GetRecommendQuestionPageByTags(ctx context.Context, user
 	// Please Make sure every question has at least one tag
 	selectSQL := entity.Question{}.TableName() + ".*"
 	if len(followedQuestionIDs) > 0 {
-		idStr := "'" + strings.Join(followedQuestionIDs, "','") + "'"
-		selectSQL += fmt.Sprintf(", CASE WHEN question.id IN (%s) THEN 0 ELSE 1 END AS order_priority", idStr)
-		orderBySQL = "order_priority, " + orderBySQL
+		safeFollowedQuestionIDs := numericIDs(followedQuestionIDs)
+		if len(safeFollowedQuestionIDs) > 0 {
+			idStr := "'" + strings.Join(safeFollowedQuestionIDs, "','") + "'"
+			selectSQL += fmt.Sprintf(", CASE WHEN question.id IN (%s) THEN 0 ELSE 1 END AS order_priority", idStr)
+			orderBySQL = "order_priority, " + orderBySQL
+			followedQuestionIDs = safeFollowedQuestionIDs
+		} else {
+			followedQuestionIDs = nil
+		}
 	}
 	session := qr.data.DB.Context(ctx).Select(selectSQL)
 
@@ -509,6 +515,27 @@ func (qr *questionRepo) GetRecommendQuestionPageByTags(ctx context.Context, user
 	}
 
 	return questionList, total, err
+}
+
+func numericIDs(ids []string) []string {
+	resp := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = uid.DeShortID(id)
+		if id == "" || id == "0" {
+			continue
+		}
+		valid := true
+		for _, r := range id {
+			if !unicode.IsDigit(r) {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			resp = append(resp, id)
+		}
+	}
+	return resp
 }
 
 func (qr *questionRepo) AdminQuestionPage(ctx context.Context, search *schema.AdminQuestionPageReq) ([]*entity.Question, int64, error) {

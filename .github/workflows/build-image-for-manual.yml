@@ -23,15 +23,49 @@ on:
       tag_name:
         type: string
         required: true
-        description: 'DockerHub img tag name'
+        description: 'Git tag and DockerHub image tag name, for example v2.1.0'
 
 jobs:
-  build:
+  validate-tag:
     if: ${{ github.repository_owner == 'apache' }}
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Validate release tag
+      shell: bash
+      env:
+        TAG_NAME: ${{ inputs.tag_name }}
+      run: |
+        set -euo pipefail
+        if [[ ! "${TAG_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+          echo "::error::tag_name must be a semantic version tag like v2.1.0"
+          exit 1
+        fi
+        if ! git rev-parse -q --verify "refs/tags/${TAG_NAME}" >/dev/null; then
+          echo "::error::git tag ${TAG_NAME} does not exist"
+          exit 1
+        fi
+
+  quality-gate:
+    if: ${{ github.repository_owner == 'apache' }}
+    needs: validate-tag
+    uses: ./.github/workflows/reusable-quality-gate.yml
+    with:
+      ref: refs/tags/${{ inputs.tag_name }}
+
+  build:
+    if: ${{ github.repository_owner == 'apache' }}
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: refs/tags/${{ inputs.tag_name }}
 
     - name: Docker meta
       id: meta

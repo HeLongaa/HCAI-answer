@@ -239,6 +239,11 @@ func (c *AIController) AgentResponses(ctx *gin.Context) {
 		handler.HandleResponse(ctx, errors.BadRequest("invalid reasoning effort"), nil)
 		return
 	}
+	userID := middleware.GetLoginUserIDFromContext(ctx)
+	if err := c.aiChatConfigService.CheckImageQuota(ctx, userID, 1); err != nil {
+		handler.HandleResponse(ctx, err, nil)
+		return
+	}
 
 	upstream, err := c.aiChatConfigService.ResolveImageAgentUpstream(ctx, req.ImageModel)
 	if err != nil {
@@ -612,6 +617,18 @@ type ConversationContext struct {
 	ReasoningEffort       string
 	Stream                bool
 	UpstreamStream        bool
+}
+
+type chatUsageReservation struct {
+	UserID           string
+	ConversationID   string
+	ChatCompletionID string
+	SiteModelID      string
+	ProviderID       int
+	ProviderName     string
+	ProviderModelID  string
+	Cost             float64
+	Reserved         bool
 }
 
 func (c *ConversationContext) GetOpenAIMessages() []openai.ChatCompletionMessage {
@@ -998,10 +1015,6 @@ func (c *AIController) ChatCompletions(ctx *gin.Context) {
 			handler.HandleResponse(ctx, err, nil)
 			return
 		}
-		if err := c.aiChatConfigService.DeductUserPoints(ctx, req.UserID, cost); err != nil {
-			handler.HandleResponse(ctx, err, nil)
-			return
-		}
 		siteModelID = req.Model
 		model = upstream.ProviderModelID
 		client = c.createOpenAIClient(upstream.BaseURL, upstream.APIKey)
@@ -1040,6 +1053,22 @@ func (c *AIController) ChatCompletions(ctx *gin.Context) {
 	}
 	conversationCtx.Stream = clientWantsStream
 	conversationCtx.UpstreamStream = upstreamStream
+	usage := &chatUsageReservation{
+		UserID:           req.UserID,
+		ConversationID:   conversationCtx.ConversationID,
+		ChatCompletionID: chatcmplID,
+		SiteModelID:      siteModelID,
+		Cost:             cost,
+	}
+	if upstream != nil {
+		usage.ProviderID = upstream.ProviderID
+		usage.ProviderName = upstream.ProviderName
+		usage.ProviderModelID = upstream.ProviderModelID
+	}
+	if err := c.reserveChatUsage(ctx, usage); err != nil {
+		handler.HandleResponse(ctx, err, nil)
+		return
+	}
 
 	if clientWantsStream {
 		c.prepareStreamResponse(ctx)
@@ -1052,13 +1081,15 @@ func (c *AIController) ChatCompletions(ctx *gin.Context) {
 			Choices:          []StreamChoice{{Index: 0, Delta: Delta{Role: "assistant"}, FinishReason: nil}},
 		})
 
+		success := false
 		if upstreamStream {
-			c.redirectRequestToAI(ctx, w, chatcmplID, conversationCtx, client)
+			success = c.redirectRequestToAI(ctx, w, chatcmplID, conversationCtx, client)
 		} else {
 			aiResponse, err := c.handleAINonStreamConversation(ctx, chatcmplID, client, conversationCtx)
 			if err != nil {
 				c.sendErrorResponse(w, chatcmplID, model, err.Error())
 			} else if aiResponse != "" {
+				success = true
 				sendStreamData(w, StreamResponse{
 					ChatCompletionID: chatcmplID,
 					Object:           "chat.completion.chunk",
@@ -1075,17 +1106,18 @@ func (c *AIController) ChatCompletions(ctx *gin.Context) {
 
 		c.sendStreamDone(w, chatcmplID, model, created)
 		c.saveConversationRecord(ctx, chatcmplID, conversationCtx)
-		c.recordChatUsage(ctx, req, conversationCtx, chatcmplID, siteModelID, upstream, cost)
+		c.finishChatUsage(ctx, usage, success)
 		return
 	}
 
 	aiResponse, err := c.handleAINonStreamConversation(ctx, chatcmplID, client, conversationCtx)
 	if err != nil {
+		c.finishChatUsage(ctx, usage, false)
 		handler.HandleResponse(ctx, errors.BadRequest(err.Error()), nil)
 		return
 	}
 	c.saveConversationRecord(ctx, chatcmplID, conversationCtx)
-	c.recordChatUsage(ctx, req, conversationCtx, chatcmplID, siteModelID, upstream, cost)
+	c.finishChatUsage(ctx, usage, true)
 	ctx.JSON(http.StatusOK, ChatCompletionsResponse{
 		ID:      chatcmplID,
 		Object:  "chat.completion",
@@ -1127,25 +1159,43 @@ func (c *AIController) sendStreamDone(w http.ResponseWriter, id, model string, c
 	}
 }
 
-func (c *AIController) recordChatUsage(ctx context.Context, req *ChatCompletionsRequest, conversationCtx *ConversationContext, chatcmplID, siteModelID string, upstream *schema.AIUpstreamModelResp, cost float64) {
-	if siteModelID != "" && upstream != nil {
-		if err := c.aiChatConfigService.RecordChatUsage(ctx, &schema.AIChatUsageLogReq{
-			UserID:           req.UserID,
-			ConversationID:   conversationCtx.ConversationID,
-			ChatCompletionID: chatcmplID,
-			SiteModelID:      siteModelID,
-			ProviderID:       upstream.ProviderID,
-			ProviderName:     upstream.ProviderName,
-			ProviderModelID:  upstream.ProviderModelID,
-			ConsumePoints:    cost,
-		}); err != nil {
-			log.Errorf("Failed to record chat usage: %v", err)
-		}
+func (c *AIController) reserveChatUsage(ctx context.Context, usage *chatUsageReservation) error {
+	if usage == nil || usage.SiteModelID == "" || usage.Cost <= 0 {
+		return nil
+	}
+	if err := c.aiChatConfigService.ReserveChatUsage(ctx, &schema.AIChatUsageLogReq{
+		UserID:           usage.UserID,
+		ConversationID:   usage.ConversationID,
+		ChatCompletionID: usage.ChatCompletionID,
+		SiteModelID:      usage.SiteModelID,
+		ProviderID:       usage.ProviderID,
+		ProviderName:     usage.ProviderName,
+		ProviderModelID:  usage.ProviderModelID,
+		ConsumePoints:    usage.Cost,
+	}); err != nil {
+		return err
+	}
+	usage.Reserved = true
+	return nil
+}
+
+func (c *AIController) finishChatUsage(ctx context.Context, usage *chatUsageReservation, success bool) {
+	if usage == nil || !usage.Reserved {
+		return
+	}
+	var err error
+	if success {
+		err = c.aiChatConfigService.CompleteChatUsage(ctx, usage.ChatCompletionID)
+	} else {
+		err = c.aiChatConfigService.ReleaseChatUsage(ctx, usage.ChatCompletionID)
+	}
+	if err != nil {
+		log.Errorf("Failed to finish chat usage: %v", err)
 	}
 }
 
-func (c *AIController) redirectRequestToAI(ctx *gin.Context, w http.ResponseWriter, id string, conversationCtx *ConversationContext, client *openai.Client) {
-	c.handleAIConversation(ctx, w, id, client, conversationCtx)
+func (c *AIController) redirectRequestToAI(ctx *gin.Context, w http.ResponseWriter, id string, conversationCtx *ConversationContext, client *openai.Client) bool {
+	return c.handleAIConversation(ctx, w, id, client, conversationCtx)
 }
 
 // createOpenAIClient
@@ -1321,9 +1371,10 @@ func (c *AIController) saveConversationRecord(ctx context.Context, chatcmplID st
 	}
 }
 
-func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWriter, id string, client *openai.Client, conversationCtx *ConversationContext) {
+func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWriter, id string, client *openai.Client, conversationCtx *ConversationContext) bool {
 	maxRounds := 10
 	messages := conversationCtx.GetOpenAIMessages()
+	success := false
 
 	for round := range maxRounds {
 		log.Debugf("AI conversation round: %d", round+1)
@@ -1340,29 +1391,34 @@ func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWri
 			aiReq.Tools = c.getMCPTools()
 		}
 
-		toolCalls, newMessages, finished, aiResponse := c.processAIStream(ctx, w, id, conversationCtx.Model, client, aiReq, messages)
+		toolCalls, newMessages, finished, aiResponse, streamOK := c.processAIStream(ctx, w, id, conversationCtx.Model, client, aiReq, messages)
 		messages = newMessages
 
 		log.Debugf("Round %d: toolCalls=%v", round+1, toolCalls)
-		if aiResponse != "" {
+		if streamOK && aiResponse != "" {
 			conversationCtx.Messages = append(conversationCtx.Messages, &ai_conversation.ConversationMessage{
 				Role:    "assistant",
 				Content: aiResponse,
 			})
+			success = true
+		}
+		if !streamOK {
+			return success
 		}
 
 		if finished {
-			return
+			return success
 		}
 
 		if len(toolCalls) > 0 {
 			messages = c.executeToolCalls(ctx, w, id, conversationCtx.Model, toolCalls, messages)
 		} else {
-			return
+			return success
 		}
 	}
 
 	log.Warnf("AI conversation reached maximum rounds limit: %d", maxRounds)
+	return success
 }
 
 func (c *AIController) handleAINonStreamConversation(ctx *gin.Context, id string, client *openai.Client, conversationCtx *ConversationContext) (string, error) {
@@ -1420,7 +1476,7 @@ func (c *AIController) handleAINonStreamConversation(ctx *gin.Context, id string
 // processAIStream
 func (c *AIController) processAIStream(
 	ctx *gin.Context, w http.ResponseWriter, id, model string, client *openai.Client, aiReq openai.ChatCompletionRequest, messages []openai.ChatCompletionMessage) (
-	[]openai.ToolCall, []openai.ChatCompletionMessage, bool, string) {
+	[]openai.ToolCall, []openai.ChatCompletionMessage, bool, string, bool) {
 	requestCtx := context.Background()
 	if ctx != nil && ctx.Request != nil {
 		requestCtx = ctx.Request.Context()
@@ -1429,11 +1485,11 @@ func (c *AIController) processAIStream(
 	if err != nil {
 		if requestCtx.Err() != nil {
 			log.Infof("AI stream request cancelled before start: %v", requestCtx.Err())
-			return nil, messages, true, ""
+			return nil, messages, true, "", false
 		}
 		log.Errorf("Failed to create stream: %v", err)
 		c.sendErrorResponse(w, id, model, fmt.Sprintf("Failed to create AI stream: %s", err.Error()))
-		return nil, messages, true, ""
+		return nil, messages, true, "", false
 	}
 	defer func() {
 		_ = stream.Close()
@@ -1442,6 +1498,7 @@ func (c *AIController) processAIStream(
 	var currentToolCalls []openai.ToolCall
 	var accumulatedContent strings.Builder
 	var accumulatedMessage openai.ChatCompletionMessage
+	streamOK := true
 	toolCallsMap := make(map[int]*openai.ToolCall)
 
 	for {
@@ -1453,11 +1510,11 @@ func (c *AIController) processAIStream(
 			}
 			if requestCtx.Err() != nil {
 				log.Infof("AI stream request cancelled: %v", requestCtx.Err())
+				streamOK = false
 				break
 			}
 			log.Errorf("Stream error: %v", err)
-			errorContent := fmt.Sprintf("Error: %s", err.Error())
-			accumulatedContent.WriteString(errorContent)
+			streamOK = false
 			c.sendErrorResponse(w, id, model, err.Error())
 			break
 		}
@@ -1518,7 +1575,7 @@ func (c *AIController) processAIStream(
 				for _, toolCall := range toolCallsMap {
 					currentToolCalls = append(currentToolCalls, *toolCall)
 				}
-				return currentToolCalls, messages, false, accumulatedContent.String()
+				return currentToolCalls, messages, false, accumulatedContent.String(), true
 			} else {
 				aiResponseContent := accumulatedContent.String()
 				if aiResponseContent != "" {
@@ -1528,13 +1585,13 @@ func (c *AIController) processAIStream(
 					}
 					messages = append(messages, accumulatedMessage)
 				}
-				return nil, messages, true, aiResponseContent
+				return nil, messages, true, aiResponseContent, true
 			}
 		}
 	}
 
 	aiResponseContent := accumulatedContent.String()
-	if aiResponseContent != "" {
+	if streamOK && aiResponseContent != "" {
 		accumulatedMessage = openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleAssistant,
 			Content: aiResponseContent,
@@ -1546,10 +1603,10 @@ func (c *AIController) processAIStream(
 		for _, toolCall := range toolCallsMap {
 			currentToolCalls = append(currentToolCalls, *toolCall)
 		}
-		return currentToolCalls, messages, false, aiResponseContent
+		return currentToolCalls, messages, false, aiResponseContent, streamOK
 	}
 
-	return currentToolCalls, messages, len(currentToolCalls) == 0, aiResponseContent
+	return currentToolCalls, messages, len(currentToolCalls) == 0, aiResponseContent, streamOK
 }
 
 // executeToolCalls

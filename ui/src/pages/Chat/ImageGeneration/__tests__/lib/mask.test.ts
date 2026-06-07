@@ -4,8 +4,8 @@ import {
   classifyMaskAlpha,
   orderInputImagesForMask,
   validateMaskTarget,
-} from '../../../../../src/pages/Chat/ImageGeneration/lib/mask'
-import type { InputImage } from '../../../../../src/pages/Chat/ImageGeneration/types'
+} from '@/pages/Chat/ImageGeneration/lib/mask'
+import type { InputImage } from '@/pages/Chat/ImageGeneration/types'
 
 function img(id: string): InputImage {
   return { id, dataUrl: `data:image/png;base64,${id}` }

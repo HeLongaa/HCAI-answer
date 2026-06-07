@@ -1,22 +1,13 @@
 import type { ImportedProviderSettings } from './apiProfiles'
 import { importCustomProviderSettingsFromJson } from './apiProfiles'
+import { isImportableConfigUrl } from './importableConfigUrl'
 import { readRuntimeEnv } from './runtimeEnv'
 
-const DEFAULT_API_URL = readRuntimeEnv(undefined)
+const DEFAULT_API_URL = readRuntimeEnv('VITE_DEFAULT_API_URL')
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
-export function isImportableConfigUrl(value: string): boolean {
-  const url = value.trim()
-  if (!url) return false
-
-  try {
-    const parsed = new URL(url)
-    return parsed.searchParams.has('settings') || parsed.pathname.toLowerCase().endsWith('.json')
-  } catch {
-    return false
-  }
-}
+export { isImportableConfigUrl }
 
 export function getCustomProviderConfigUrl(defaultApiUrl = DEFAULT_API_URL): string {
   const url = defaultApiUrl.trim()

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PARAMS } from '../../../../../src/pages/Chat/ImageGeneration/types'
-import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_SETTINGS, normalizeSettings } from '../../../../../src/pages/Chat/ImageGeneration/lib/apiProfiles'
-import { getOutputImageLimitForSettings, normalizeParamsForSettings } from '../../../../../src/pages/Chat/ImageGeneration/lib/paramCompatibility'
+import { DEFAULT_PARAMS } from '@/pages/Chat/ImageGeneration/types'
+import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_SETTINGS, normalizeSettings } from '@/pages/Chat/ImageGeneration/lib/apiProfiles'
+import { getOutputImageLimitForSettings, normalizeParamsForSettings } from '@/pages/Chat/ImageGeneration/lib/paramCompatibility'
 
 describe('parameter compatibility', () => {
   it('limits OpenAI output count to 10', () => {

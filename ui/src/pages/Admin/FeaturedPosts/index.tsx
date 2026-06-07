@@ -2,9 +2,10 @@ import { FC, useState } from 'react';
 import { Button, Form, Modal, Table } from 'react-bootstrap';
 import { Link, useSearchParams } from 'react-router-dom';
 
-import { featurePost, useFeaturedPosts } from '@/services';
+import { featurePost, revokeFeaturedPost, useFeaturedPosts } from '@/services';
 import { FormatTime, Pagination } from '@/components';
 import { toastStore } from '@/stores';
+import type { FeaturedPost } from '@/services';
 
 const PAGE_SIZE = 20;
 
@@ -20,8 +21,11 @@ const FeaturedPosts: FC = () => {
   const [questionID, setQuestionID] = useState('');
   const [rewardPoints, setRewardPoints] = useState(10);
   const [note, setNote] = useState('');
+  const [revokeTarget, setRevokeTarget] = useState<FeaturedPost | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
+    setSubmitting(true);
     try {
       await featurePost({
         question_id: questionID,
@@ -41,6 +45,30 @@ const FeaturedPosts: FC = () => {
         msg: getErrorMessage(err, '精选失败，请检查帖子 ID 或稍后重试'),
         variant: 'danger',
       });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const revoke = async () => {
+    if (!revokeTarget) {
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await revokeFeaturedPost({ question_id: revokeTarget.question_id });
+      toastStore
+        .getState()
+        .show({ msg: '已取消精选并收回积分', variant: 'success' });
+      setRevokeTarget(null);
+      mutate();
+    } catch (err: any) {
+      toastStore.getState().show({
+        msg: getErrorMessage(err, '取消精选失败，请稍后重试'),
+        variant: 'danger',
+      });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -58,6 +86,7 @@ const FeaturedPosts: FC = () => {
             <th>作者</th>
             <th>奖励</th>
             <th>状态</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -73,6 +102,16 @@ const FeaturedPosts: FC = () => {
               <td>{item.reward_points}</td>
               <td>
                 {item.revoked ? '已收回' : item.active ? '精选中' : '已取消'}
+              </td>
+              <td>
+                {item.active && !item.revoked ? (
+                  <Button
+                    size="sm"
+                    variant="outline-danger"
+                    onClick={() => setRevokeTarget(item)}>
+                    取消精选
+                  </Button>
+                ) : null}
               </td>
             </tr>
           ))}
@@ -118,8 +157,31 @@ const FeaturedPosts: FC = () => {
           <Button variant="link" onClick={() => setOpen(false)}>
             取消
           </Button>
-          <Button disabled={!questionID || rewardPoints <= 0} onClick={submit}>
+          <Button
+            disabled={!questionID || rewardPoints <= 0 || submitting}
+            onClick={submit}>
             精选并发积分
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <Modal
+        show={Boolean(revokeTarget)}
+        onHide={() => setRevokeTarget(null)}
+        centered>
+        <Modal.Header closeButton>
+          <Modal.Title>取消精选</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          确认取消精选“{revokeTarget?.title}
+          ”吗？取消后会收回本次精选发放的积分。
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="link" onClick={() => setRevokeTarget(null)}>
+            保留精选
+          </Button>
+          <Button variant="danger" disabled={submitting} onClick={revoke}>
+            确认取消
           </Button>
         </Modal.Footer>
       </Modal>

@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/apache/answer/internal/base/data"
 	"github.com/apache/answer/internal/entity"
@@ -31,6 +32,10 @@ import (
 )
 
 var ErrRedeemCodeUsed = errors.New("redeem code already used")
+var ErrQuotaInsufficient = errors.New("quota is insufficient")
+var ErrVideoDailyQuotaInsufficient = errors.New("video daily quota is insufficient")
+var ErrVideoMonthlyQuotaInsufficient = errors.New("video monthly quota is insufficient")
+var ErrProviderInUse = errors.New("provider is still used by models or mappings")
 
 type AIChatConfigRepo interface {
 	ListProviders(ctx context.Context) ([]*entity.AIProvider, error)
@@ -38,6 +43,7 @@ type AIChatConfigRepo interface {
 	CreateProvider(ctx context.Context, provider *entity.AIProvider) error
 	UpdateProvider(ctx context.Context, provider *entity.AIProvider, cols ...string) error
 	DeleteProvider(ctx context.Context, id int) error
+	CountProviderMappingItems(ctx context.Context, providerID int) (int64, error)
 	ListProviderModels(ctx context.Context, providerID int) ([]*entity.AIProviderModel, error)
 	ReplaceProviderModels(ctx context.Context, providerID int, models []*entity.AIProviderModel) error
 
@@ -67,7 +73,9 @@ type AIChatConfigRepo interface {
 	GetConsumeRate(ctx context.Context, id int) (*entity.AIModelConsumeRate, bool, error)
 	GetConsumeRateByModelMappingID(ctx context.Context, modelMappingID int) (*entity.AIModelConsumeRate, bool, error)
 	SaveConsumeRate(ctx context.Context, rate *entity.AIModelConsumeRate) error
-	CreateUsageLog(ctx context.Context, log *entity.AIChatUsageLog) error
+	ReserveChatUsage(ctx context.Context, log *entity.AIChatUsageLog, limit int, startAt, endAt any) error
+	CompleteChatUsage(ctx context.Context, chatCompletionID string) error
+	ReleaseChatUsage(ctx context.Context, chatCompletionID string) error
 	SumUserChatUsage(ctx context.Context, userID string, startAt, endAt any) (float64, error)
 
 	EnsureImageTables(ctx context.Context) error
@@ -77,6 +85,7 @@ type AIChatConfigRepo interface {
 	CreateImageProvider(ctx context.Context, provider *entity.AIImageProvider) error
 	UpdateImageProvider(ctx context.Context, provider *entity.AIImageProvider, cols ...string) error
 	DeleteImageProvider(ctx context.Context, id int) error
+	CountImageModelsByProvider(ctx context.Context, providerID int) (int64, error)
 	ListImageModels(ctx context.Context, onlyEnabled bool) ([]*entity.AIImageModel, error)
 	GetImageModel(ctx context.Context, id int) (*entity.AIImageModel, bool, error)
 	GetImageModelBySiteModelID(ctx context.Context, siteModelID string) (*entity.AIImageModel, bool, error)
@@ -84,7 +93,7 @@ type AIChatConfigRepo interface {
 	DeleteImageModel(ctx context.Context, id int) error
 	GetImageSetting(ctx context.Context) (*entity.AIImageSetting, bool, error)
 	SaveImageSetting(ctx context.Context, setting *entity.AIImageSetting) error
-	CreateImageGeneration(ctx context.Context, generation *entity.AIImageGeneration) error
+	CreateImageGenerationWithQuota(ctx context.Context, generation *entity.AIImageGeneration, limit int, startAt, endAt any) error
 	UpdateImageGeneration(ctx context.Context, generationID string, generation *entity.AIImageGeneration, cols ...string) error
 	DeleteUserImageGeneration(ctx context.Context, userID, generationID string) error
 	ListUserImageGenerations(ctx context.Context, userID string, limit int) ([]*entity.AIImageGeneration, error)
@@ -97,6 +106,7 @@ type AIChatConfigRepo interface {
 	CreateVideoProvider(ctx context.Context, provider *entity.AIVideoProvider) error
 	UpdateVideoProvider(ctx context.Context, provider *entity.AIVideoProvider, cols ...string) error
 	DeleteVideoProvider(ctx context.Context, id int) error
+	CountVideoModelsByProvider(ctx context.Context, providerID int) (int64, error)
 	ListVideoModels(ctx context.Context, onlyEnabled bool) ([]*entity.AIVideoModel, error)
 	GetVideoModel(ctx context.Context, id int) (*entity.AIVideoModel, bool, error)
 	GetVideoModelBySiteModelID(ctx context.Context, siteModelID string) (*entity.AIVideoModel, bool, error)
@@ -104,7 +114,7 @@ type AIChatConfigRepo interface {
 	DeleteVideoModel(ctx context.Context, id int) error
 	GetVideoSetting(ctx context.Context) (*entity.AIVideoSetting, bool, error)
 	SaveVideoSetting(ctx context.Context, setting *entity.AIVideoSetting) error
-	CreateVideoGeneration(ctx context.Context, generation *entity.AIVideoGeneration) error
+	CreateVideoGenerationWithQuota(ctx context.Context, generation *entity.AIVideoGeneration, dailyLimit, monthLimit int, dayStart, dayEnd, monthStart, monthEnd any) error
 	UpdateVideoGeneration(ctx context.Context, generationID string, generation *entity.AIVideoGeneration, cols ...string) error
 	GetVideoGeneration(ctx context.Context, generationID string) (*entity.AIVideoGeneration, bool, error)
 	ListUserVideoGenerations(ctx context.Context, userID string, limit int) ([]*entity.AIVideoGeneration, error)
@@ -156,6 +166,10 @@ func (r *aiChatConfigRepo) DeleteProvider(ctx context.Context, id int) error {
 		return nil, err
 	})
 	return err
+}
+
+func (r *aiChatConfigRepo) CountProviderMappingItems(ctx context.Context, providerID int) (int64, error) {
+	return r.data.DB.Context(ctx).Where("provider_id = ?", providerID).Count(new(entity.AIModelMappingItem))
 }
 
 func (r *aiChatConfigRepo) ListProviderModels(ctx context.Context, providerID int) ([]*entity.AIProviderModel, error) {
@@ -411,8 +425,52 @@ func (r *aiChatConfigRepo) SaveConsumeRate(ctx context.Context, rate *entity.AIM
 	return err
 }
 
-func (r *aiChatConfigRepo) CreateUsageLog(ctx context.Context, log *entity.AIChatUsageLog) error {
-	_, err := r.data.DB.Context(ctx).Insert(log)
+func (r *aiChatConfigRepo) ReserveChatUsage(ctx context.Context, log *entity.AIChatUsageLog, limit int, startAt, endAt any) error {
+	if log == nil {
+		return nil
+	}
+	if log.Status == "" {
+		log.Status = "reserved"
+	}
+	_, err := r.data.DB.Transaction(func(session *xorm.Session) (any, error) {
+		if err := lockUserForQuota(ctx, session, log.UserID); err != nil {
+			return nil, err
+		}
+		var total struct {
+			ConsumePoints float64 `xorm:"consume_points"`
+		}
+		if _, err := session.Context(ctx).
+			Table(new(entity.AIChatUsageLog)).
+			Select("COALESCE(SUM(consume_points), 0) AS consume_points").
+			Where("user_id = ?", log.UserID).
+			And("status IN (?, ?)", "reserved", "completed").
+			And("created_at >= ?", startAt).
+			And("created_at < ?", endAt).
+			Get(&total); err != nil {
+			return nil, err
+		}
+		if limit >= 0 && int(math.Ceil(total.ConsumePoints+log.ConsumePoints)) > limit {
+			return nil, ErrQuotaInsufficient
+		}
+		_, err := session.Context(ctx).Insert(log)
+		return nil, err
+	})
+	return err
+}
+
+func (r *aiChatConfigRepo) CompleteChatUsage(ctx context.Context, chatCompletionID string) error {
+	_, err := r.data.DB.Context(ctx).
+		Where("chat_completion_id = ?", chatCompletionID).
+		Cols("status").
+		Update(&entity.AIChatUsageLog{Status: "completed"})
+	return err
+}
+
+func (r *aiChatConfigRepo) ReleaseChatUsage(ctx context.Context, chatCompletionID string) error {
+	_, err := r.data.DB.Context(ctx).
+		Where("chat_completion_id = ?", chatCompletionID).
+		Cols("status").
+		Update(&entity.AIChatUsageLog{Status: "failed"})
 	return err
 }
 
@@ -424,6 +482,7 @@ func (r *aiChatConfigRepo) SumUserChatUsage(ctx context.Context, userID string, 
 		Table(new(entity.AIChatUsageLog)).
 		Select("COALESCE(SUM(consume_points), 0) AS consume_points").
 		Where("user_id = ?", userID).
+		And("status IN (?, ?)", "reserved", "completed").
 		And("created_at >= ?", startAt).
 		And("created_at < ?", endAt).
 		Get(&total)
@@ -643,6 +702,10 @@ func (r *aiChatConfigRepo) DeleteImageProvider(ctx context.Context, id int) erro
 	return err
 }
 
+func (r *aiChatConfigRepo) CountImageModelsByProvider(ctx context.Context, providerID int) (int64, error) {
+	return r.data.DB.Context(ctx).Where("provider_id = ?", providerID).Count(new(entity.AIImageModel))
+}
+
 func (r *aiChatConfigRepo) ListImageModels(ctx context.Context, onlyEnabled bool) ([]*entity.AIImageModel, error) {
 	list := make([]*entity.AIImageModel, 0)
 	session := r.data.DB.Context(ctx).Asc("sort_order", "id")
@@ -698,8 +761,23 @@ func (r *aiChatConfigRepo) SaveImageSetting(ctx context.Context, setting *entity
 	return err
 }
 
-func (r *aiChatConfigRepo) CreateImageGeneration(ctx context.Context, generation *entity.AIImageGeneration) error {
-	_, err := r.data.DB.Context(ctx).Insert(generation)
+func (r *aiChatConfigRepo) CreateImageGenerationWithQuota(ctx context.Context, generation *entity.AIImageGeneration, limit int, startAt, endAt any) error {
+	_, err := r.data.DB.Transaction(func(session *xorm.Session) (any, error) {
+		if err := lockUserForQuota(ctx, session, generation.UserID); err != nil {
+			return nil, err
+		}
+		if limit >= 0 {
+			used, err := sumUserImageGenerations(ctx, session, generation.UserID, startAt, endAt)
+			if err != nil {
+				return nil, err
+			}
+			if used+generation.Count > limit {
+				return nil, ErrQuotaInsufficient
+			}
+		}
+		_, err := session.Context(ctx).Insert(generation)
+		return nil, err
+	})
 	return err
 }
 
@@ -731,14 +809,18 @@ func (r *aiChatConfigRepo) ListUserImageGenerations(ctx context.Context, userID 
 }
 
 func (r *aiChatConfigRepo) CountUserImageGenerations(ctx context.Context, userID string, startAt, endAt any) (int, error) {
+	return sumUserImageGenerations(ctx, r.data.DB.Context(ctx), userID, startAt, endAt)
+}
+
+func sumUserImageGenerations(ctx context.Context, session *xorm.Session, userID string, startAt, endAt any) (int, error) {
 	var total struct {
 		Count int `xorm:"count"`
 	}
-	ok, err := r.data.DB.Context(ctx).
+	ok, err := session.Context(ctx).
 		Table(new(entity.AIImageGeneration)).
 		Select("COALESCE(SUM(count), 0) AS count").
 		Where("user_id = ?", userID).
-		And("status = ?", "completed").
+		And("status IN (?, ?, ?)", "generating", "queued", "completed").
 		And("created_at >= ?", startAt).
 		And("created_at < ?", endAt).
 		Get(&total)
@@ -817,6 +899,10 @@ func (r *aiChatConfigRepo) DeleteVideoProvider(ctx context.Context, id int) erro
 	return err
 }
 
+func (r *aiChatConfigRepo) CountVideoModelsByProvider(ctx context.Context, providerID int) (int64, error) {
+	return r.data.DB.Context(ctx).Where("provider_id = ?", providerID).Count(new(entity.AIVideoModel))
+}
+
 func (r *aiChatConfigRepo) ListVideoModels(ctx context.Context, onlyEnabled bool) ([]*entity.AIVideoModel, error) {
 	list := make([]*entity.AIVideoModel, 0)
 	session := r.data.DB.Context(ctx).Asc("sort_order", "id")
@@ -872,8 +958,32 @@ func (r *aiChatConfigRepo) SaveVideoSetting(ctx context.Context, setting *entity
 	return err
 }
 
-func (r *aiChatConfigRepo) CreateVideoGeneration(ctx context.Context, generation *entity.AIVideoGeneration) error {
-	_, err := r.data.DB.Context(ctx).Insert(generation)
+func (r *aiChatConfigRepo) CreateVideoGenerationWithQuota(ctx context.Context, generation *entity.AIVideoGeneration, dailyLimit, monthLimit int, dayStart, dayEnd, monthStart, monthEnd any) error {
+	_, err := r.data.DB.Transaction(func(session *xorm.Session) (any, error) {
+		if err := lockUserForQuota(ctx, session, generation.UserID); err != nil {
+			return nil, err
+		}
+		if dailyLimit >= 0 {
+			used, err := countUserVideoGenerations(ctx, session, generation.UserID, dayStart, dayEnd)
+			if err != nil {
+				return nil, err
+			}
+			if used+1 > dailyLimit {
+				return nil, ErrVideoDailyQuotaInsufficient
+			}
+		}
+		if monthLimit >= 0 {
+			used, err := countUserVideoGenerations(ctx, session, generation.UserID, monthStart, monthEnd)
+			if err != nil {
+				return nil, err
+			}
+			if used+1 > monthLimit {
+				return nil, ErrVideoMonthlyQuotaInsufficient
+			}
+		}
+		_, err := session.Context(ctx).Insert(generation)
+		return nil, err
+	})
 	return err
 }
 
@@ -904,14 +1014,18 @@ func (r *aiChatConfigRepo) ListUserVideoGenerations(ctx context.Context, userID 
 }
 
 func (r *aiChatConfigRepo) CountUserVideoGenerations(ctx context.Context, userID string, startAt, endAt any) (int, error) {
+	return countUserVideoGenerations(ctx, r.data.DB.Context(ctx), userID, startAt, endAt)
+}
+
+func countUserVideoGenerations(ctx context.Context, session *xorm.Session, userID string, startAt, endAt any) (int, error) {
 	var total struct {
 		Count int `xorm:"count"`
 	}
-	ok, err := r.data.DB.Context(ctx).
+	ok, err := session.Context(ctx).
 		Table(new(entity.AIVideoGeneration)).
 		Select("COUNT(1) AS count").
 		Where("user_id = ?", userID).
-		And("status = ?", "completed").
+		And("status IN (?, ?, ?, ?)", entity.AIVideoStatusQueued, entity.AIVideoStatusInProgress, entity.AIVideoStatusCompleted, entity.AIVideoStatusFailed).
 		And("created_at >= ?", startAt).
 		And("created_at < ?", endAt).
 		Get(&total)
@@ -919,4 +1033,16 @@ func (r *aiChatConfigRepo) CountUserVideoGenerations(ctx context.Context, userID
 		return 0, err
 	}
 	return total.Count, nil
+}
+
+func lockUserForQuota(ctx context.Context, session *xorm.Session, userID string) error {
+	user := &entity.User{}
+	exist, err := session.Context(ctx).ID(userID).ForUpdate().Get(user)
+	if err != nil {
+		return err
+	}
+	if !exist {
+		return fmt.Errorf("user not found")
+	}
+	return nil
 }

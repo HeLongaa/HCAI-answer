@@ -14,7 +14,7 @@ import {
   normalizeSettings,
   switchApiProfileProvider,
   validateApiProfile,
-} from '../../../../../src/pages/Chat/ImageGeneration/lib/apiProfiles'
+} from '@/pages/Chat/ImageGeneration/lib/apiProfiles'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -556,11 +556,11 @@ describe('custom providers', () => {
 
   it('enables streaming by default and preserves partial image count', () => {
     expect(createDefaultOpenAIProfile().streamImages).toBe(true)
-    expect(createDefaultOpenAIProfile().streamPartialImages).toBe(1)
+    expect(createDefaultOpenAIProfile().streamPartialImages).toBe(3)
     expect(DEFAULT_SETTINGS.streamImages).toBe(true)
-    expect(DEFAULT_SETTINGS.streamPartialImages).toBe(1)
+    expect(DEFAULT_SETTINGS.streamPartialImages).toBe(3)
     expect(DEFAULT_SETTINGS.profiles[0].streamImages).toBe(true)
-    expect(DEFAULT_SETTINGS.profiles[0].streamPartialImages).toBe(1)
+    expect(DEFAULT_SETTINGS.profiles[0].streamPartialImages).toBe(3)
 
     const normalized = normalizeSettings({
       profiles: [

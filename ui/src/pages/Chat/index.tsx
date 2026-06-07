@@ -1989,7 +1989,7 @@ const Chat: FC = () => {
               </div>
 
               <div className="hcai-subscription-period">
-                当前周期： {formatDateTime(subscription.period_start)} -{' '}
+                本月额度周期： {formatDateTime(subscription.period_start)} -{' '}
                 {formatSubscriptionDateTime(subscription.period_end)}
               </div>
               <button

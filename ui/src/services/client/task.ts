@@ -3,6 +3,64 @@ import qs from 'qs';
 
 import request from '@/utils/request';
 
+export type TaskStatus =
+  | 'pending_review'
+  | 'rejected'
+  | 'open'
+  | 'in_progress'
+  | 'submitted'
+  | 'completed'
+  | 'failed'
+  | 'closed';
+
+export type TaskSubmissionStatus = 'pending' | 'approved' | 'rejected';
+
+export interface TaskListParams {
+  page?: number;
+  page_size?: number;
+  status?: TaskStatus;
+  mine?: boolean | string;
+}
+
+export interface TaskCreateParams {
+  title: string;
+  description: string;
+  attachments?: string[];
+}
+
+export interface TaskSubmitParams {
+  id: number;
+  content: string;
+  links?: string[];
+  attachments?: string[];
+}
+
+export interface AdminTaskReviewParams {
+  id: number;
+  title: string;
+  description: string;
+  tags: string[];
+  reward_points: number;
+  deadline: number;
+  submission_requirements: string;
+  attachments: string[];
+  status: Extract<TaskStatus, 'open' | 'rejected' | 'closed' | 'failed'>;
+  review_comment?: string;
+}
+
+export interface AdminTaskSubmissionReviewParams {
+  submission_id?: number;
+  task_id?: number;
+  approved: boolean;
+  review_note?: string;
+}
+
+export interface FeaturedPostParams {
+  question_id: string;
+  reward_points: number;
+  note?: string;
+}
+
 export interface TaskItem {
   id: number;
   created_at: number;
@@ -19,7 +77,7 @@ export interface TaskItem {
   deadline: number;
   submission_requirements: string;
   attachments: string[];
-  status: string;
+  status: TaskStatus;
   review_comment: string;
   claimed_at: number;
   completed_at: number;
@@ -36,7 +94,7 @@ export interface TaskSubmission {
   content: string;
   links: string[];
   attachments: string[];
-  status: string;
+  status: TaskSubmissionStatus;
   review_note: string;
 }
 
@@ -66,7 +124,7 @@ export interface FeaturedPost {
   revoked_at: number;
 }
 
-export const useTasks = (params: Record<string, any>) =>
+export const useTasks = (params: TaskListParams) =>
   useSWR<{ count: number; list: TaskItem[] }>(
     `/answer/api/v1/tasks?${qs.stringify(params)}`,
     request.instance.get,
@@ -75,21 +133,14 @@ export const useTasks = (params: Record<string, any>) =>
 export const getTask = (id: number) =>
   request.get<TaskItem>(`/answer/api/v1/task?id=${id}`);
 
-export const createTask = (params: {
-  title: string;
-  description: string;
-  attachments?: string[];
-}) => request.post('/answer/api/v1/task', params);
+export const createTask = (params: TaskCreateParams) =>
+  request.post('/answer/api/v1/task', params);
 
 export const claimTask = (id: number) =>
   request.post('/answer/api/v1/task/claim', { id });
 
-export const submitTask = (params: {
-  id: number;
-  content: string;
-  links?: string[];
-  attachments?: string[];
-}) => request.post('/answer/api/v1/task/submission', params);
+export const submitTask = (params: TaskSubmitParams) =>
+  request.post('/answer/api/v1/task/submission', params);
 
 export const usePointAccount = () =>
   useSWR<{ balance: number }>(
@@ -97,42 +148,41 @@ export const usePointAccount = () =>
     request.instance.get,
   );
 
-export const usePointTransactions = (params: Record<string, any>) =>
+export const usePointTransactions = (params: {
+  page?: number;
+  page_size?: number;
+}) =>
   useSWR<{ count: number; list: PointTransaction[] }>(
     `/answer/api/v1/points/transactions?${qs.stringify(params)}`,
     request.instance.get,
   );
 
-export const useAdminTasks = (params: Record<string, any>) =>
+export const useAdminTasks = (params: TaskListParams) =>
   useSWR<{ count: number; list: TaskItem[] }>(
     `/answer/admin/api/tasks?${qs.stringify(params)}`,
     request.instance.get,
   );
 
-export const reviewTask = (params: Record<string, any>) =>
+export const reviewTask = (params: AdminTaskReviewParams) =>
   request.put('/answer/admin/api/task/review', params);
 
 export const assignTask = (params: { id: number; assignee_id: string }) =>
   request.put('/answer/admin/api/task/assign', params);
 
-export const reviewTaskSubmission = (params: {
-  submission_id?: number;
-  task_id?: number;
-  approved: boolean;
-  review_note?: string;
-}) => request.put('/answer/admin/api/task/submission/review', params);
+export const reviewTaskSubmission = (params: AdminTaskSubmissionReviewParams) =>
+  request.put('/answer/admin/api/task/submission/review', params);
 
-export const useFeaturedPosts = (params: Record<string, any>) =>
+export const useFeaturedPosts = (params: {
+  page?: number;
+  page_size?: number;
+}) =>
   useSWR<{ count: number; list: FeaturedPost[] }>(
     `/answer/admin/api/featured-posts?${qs.stringify(params)}`,
     request.instance.get,
   );
 
-export const featurePost = (params: {
-  question_id: string;
-  reward_points: number;
-  note?: string;
-}) => request.post('/answer/admin/api/featured-post', params);
+export const featurePost = (params: FeaturedPostParams) =>
+  request.post('/answer/admin/api/featured-post', params);
 
 export const revokeFeaturedPost = (params: { question_id: string }) =>
   request.put('/answer/admin/api/featured-post/revoke', params);

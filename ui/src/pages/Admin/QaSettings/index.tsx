@@ -125,7 +125,6 @@ const QaSettings = () => {
         formMeta.min_tags.value = res.min_tags;
         formMeta.min_content.value = res.min_content;
         formMeta.restrict_answer.value = res.restrict_answer;
-        console.log('res', res, formMeta);
         setFormData(formMeta);
       }
     });

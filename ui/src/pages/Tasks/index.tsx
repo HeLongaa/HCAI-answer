@@ -4,7 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 
 import { Empty, FormatTime, Pagination } from '@/components';
 import { claimTask, submitTask, TaskItem, useTasks } from '@/services';
-import { toastStore } from '@/stores';
+import { loggedUserInfoStore, toastStore } from '@/stores';
 import { usePageTags } from '@/hooks';
 import '@/components/QuestionList/index.scss';
 
@@ -80,6 +80,7 @@ const Tasks: FC = () => {
   const [submitContent, setSubmitContent] = useState('');
   const [submitLinks, setSubmitLinks] = useState('');
   const [expandedTaskID, setExpandedTaskID] = useState<number | null>(null);
+  const currentUserID = loggedUserInfoStore((state) => state.user.id);
   const tasks = mine
     ? data?.list || []
     : (data?.list || []).filter((task) => publicTaskStatuses.has(task.status));
@@ -187,6 +188,8 @@ const Tasks: FC = () => {
           const activityTime =
             task.deadline || task.completed_at || task.updated_at;
           const expanded = expandedTaskID === task.id;
+          const canSubmit =
+            task.status === 'in_progress' && task.assignee_id === currentUserID;
 
           return (
             <ListGroup.Item
@@ -255,7 +258,7 @@ const Tasks: FC = () => {
                         领取
                       </Button>
                     ) : null}
-                    {task.status === 'in_progress' ? (
+                    {canSubmit ? (
                       <Button
                         size="sm"
                         variant="outline-primary"

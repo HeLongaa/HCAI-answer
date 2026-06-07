@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { strToU8, zipSync } from 'fflate'
-import { DEFAULT_PARAMS } from '../../../../src/pages/Chat/ImageGeneration/types'
-import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from '../../../../src/pages/Chat/ImageGeneration/lib/apiProfiles'
-import type { AgentConversation, ExportData, StoredImage, StoredImageThumbnail, TaskRecord } from '../../../../src/pages/Chat/ImageGeneration/types'
-import { getSelectedImageMentionLabel } from '../../../../src/pages/Chat/ImageGeneration/lib/promptImageMentions'
-vi.mock('../../../../src/pages/Chat/ImageGeneration/lib/db', () => {
+import type { AiImageModel } from '@/common/interface'
+import { DEFAULT_PARAMS } from '@/pages/Chat/ImageGeneration/types'
+import { createDefaultFalProfile, createDefaultOpenAIProfile, DEFAULT_RESPONSES_MODEL, DEFAULT_SETTINGS, normalizeSettings } from '@/pages/Chat/ImageGeneration/lib/apiProfiles'
+import type { AgentConversation, StoredImage, StoredImageThumbnail, TaskRecord } from '@/pages/Chat/ImageGeneration/types'
+import { getSelectedImageMentionLabel } from '@/pages/Chat/ImageGeneration/lib/promptImageMentions'
+import { clearAgentConversations, clearImages, clearTasks, getAllAgentConversations, getAllTasks, putAgentConversation, putImage, putTask as putDbTask } from '@/pages/Chat/ImageGeneration/lib/db'
+import { callAgentResponsesApi, callBatchImageSingle } from '@/pages/Chat/ImageGeneration/lib/agentApi'
+import { cleanStaleAgentInputDrafts, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitTask, useStore } from '@/pages/Chat/ImageGeneration/store'
+
+vi.mock('@/pages/Chat/ImageGeneration/lib/db', () => {
   const tasks = new Map<string, TaskRecord>()
   const images = new Map<string, StoredImage>()
   const thumbnails = new Map<string, StoredImageThumbnail>()
@@ -67,7 +71,7 @@ vi.mock('../../../../src/pages/Chat/ImageGeneration/lib/db', () => {
     },
   }
 })
-vi.mock('../../../../src/pages/Chat/ImageGeneration/lib/api', () => ({
+vi.mock('@/pages/Chat/ImageGeneration/lib/api', () => ({
   callImageApi: vi.fn(async () => ({
     images: [],
     actualParams: {},
@@ -75,7 +79,7 @@ vi.mock('../../../../src/pages/Chat/ImageGeneration/lib/api', () => ({
     revisedPrompts: [],
   })),
 }))
-vi.mock('../../../../src/pages/Chat/ImageGeneration/lib/agentApi', () => ({
+vi.mock('@/pages/Chat/ImageGeneration/lib/agentApi', () => ({
   callAgentConversationTitleApi: vi.fn(async () => '标题'),
   callAgentResponsesApi: vi.fn(() => new Promise(() => {})),
   callBatchImageSingle: vi.fn(async (opts: { batchItemId: string; prompt: string }) => ({
@@ -95,12 +99,31 @@ vi.mock('../../../../src/pages/Chat/ImageGeneration/lib/agentApi', () => ({
     }
   }),
 }))
-import { clearAgentConversations, clearImages, clearTasks, getAllAgentConversations, getAllTasks, putAgentConversation, putImage, putTask as putDbTask } from '../../../../src/pages/Chat/ImageGeneration/lib/db'
-import { callAgentResponsesApi, callBatchImageSingle } from '../../../../src/pages/Chat/ImageGeneration/lib/agentApi'
-import { cleanStaleAgentInputDrafts, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitTask, useStore } from '../../../../src/pages/Chat/ImageGeneration/store'
 
 const imageA = { id: 'image-a', dataUrl: 'data:image/png;base64,a' }
 const imageB = { id: 'image-b', dataUrl: 'data:image/png;base64,b' }
+const testSystemImageModel: AiImageModel = {
+  id: 1,
+  provider_id: 1,
+  provider_name: 'test-provider',
+  site_model_id: 'test-image-model',
+  provider_model_id: 'provider-image-model',
+  agent_model_id: 'test-agent-model',
+  display_name: 'Test Image Model',
+  description: '',
+  default_size: DEFAULT_PARAMS.size,
+  api_mode: 'responses',
+  supports_edits: true,
+  supports_references: true,
+  supports_stream: true,
+  default_quality: DEFAULT_PARAMS.quality,
+  default_format: DEFAULT_PARAMS.output_format,
+  extra_config: '',
+  enabled: true,
+  sort_order: 1,
+  created_at: 1,
+  updated_at: 1,
+}
 
 describe('error toast messages', () => {
   it('drops long error detail after the failure title', () => {
@@ -141,12 +164,6 @@ function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
     elapsed: 1,
     ...overrides,
   }
-}
-
-function importFile(data: ExportData): File {
-  const zipped = zipSync({ 'manifest.json': strToU8(JSON.stringify(data)) })
-  const buffer = zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength)
-  return { arrayBuffer: async () => buffer } as File
 }
 
 describe('favorite collection deletion', () => {
@@ -210,6 +227,11 @@ describe('mask draft lifecycle in store actions', () => {
       maskDraft: null,
       maskEditorImageId: null,
       params: { ...DEFAULT_PARAMS },
+      systemImageModels: [testSystemImageModel],
+      selectedSystemImageModelId: testSystemImageModel.site_model_id,
+      systemImageModelsLoading: false,
+      systemImageModelsLoaded: true,
+      systemImageModelsError: null,
       tasks: [],
       detailTaskId: null,
       lightboxImageId: null,
@@ -259,6 +281,29 @@ describe('mask draft lifecycle in store actions', () => {
     const state = useStore.getState()
     expect(state.tasks).toHaveLength(1)
     expect(state.showToast).toHaveBeenCalledWith('任务已提交', 'success')
+  })
+
+  it('uses the current partial image count for gallery streaming requests', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      'data: {"type":"image_generation.completed","b64_json":"final-image"}\n\n',
+      { status: 200 },
+    ))
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        streamPartialImages: 1,
+        profiles: [createDefaultOpenAIProfile({ streamPartialImages: 1 })],
+      }),
+    })
+
+    await submitTask()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    const state = useStore.getState()
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init?.body)) as { partial_images?: number }
+    expect(state.tasks[0].streamPartialImages).toBe(1)
+    expect(body.partial_images).toBe(1)
   })
 
   it('preserves selected image mentions when replacing a mask target with an equivalent image id', () => {
@@ -401,10 +446,10 @@ describe('agent conversation persistence', () => {
     const stored = await getAllAgentConversations()
     expect(state.agentConversations.map((conversation) => conversation.id)).toEqual(['stored-conversation', 'legacy-conversation'])
     expect(state.activeAgentConversationId).toBe('legacy-conversation')
-    expect(stored.map((conversation) => conversation.id)).toEqual(['stored-conversation', 'legacy-conversation'])
+    expect(stored).toEqual([])
   })
 
-  it('strips generated image payloads from legacy task raw payloads during startup migration', async () => {
+  it('does not restore legacy local task payloads during startup', async () => {
     await putDbTask(task({
       id: 'legacy-task',
       outputImages: ['image-live'],
@@ -415,10 +460,7 @@ describe('agent conversation persistence', () => {
 
     await initStore()
 
-    const storedTasks = await getAllTasks()
-    const serializedStoredTasks = JSON.stringify(storedTasks)
-    expect(serializedStoredTasks).toContain('image_generation_call')
-    expect(serializedStoredTasks).not.toContain('legacy-task-base64')
+    expect(useStore.getState().tasks).toEqual([])
   })
 
   it('keeps agent conversations created while initStore is loading', async () => {
@@ -434,7 +476,7 @@ describe('agent conversation persistence', () => {
     const stored = await getAllAgentConversations()
     expect(state.agentConversations.map((conversation) => conversation.id)).toEqual(['legacy-conversation', 'early-conversation'])
     expect(state.activeAgentConversationId).toBe('early-conversation')
-    expect(stored.map((conversation) => conversation.id)).toEqual(['legacy-conversation', 'early-conversation'])
+    expect(stored).toEqual([])
   })
 
   it('restores active conversation and draft when localStorage no longer stores conversations', async () => {
@@ -695,181 +737,6 @@ describe('agent round deletion', () => {
     expect(remapAgentRoundMentionsForPathChange('继续参考 @第1轮图1、@第2轮图1、@第3轮图1', oldPath, newPath))
       .toBe('继续参考 @第1轮图1、@已删除轮次图1、@第2轮图1')
   })
-})
-
-describe('data import', () => {
-  beforeEach(async () => {
-    useStore.setState({
-      tasks: [],
-      agentConversations: [],
-      activeAgentConversationId: null,
-      showToast: vi.fn(),
-    })
-    await clearAgentConversations()
-  })
-
-  it('restores favorite collections and default collection when importing task data', async () => {
-    await clearTasks()
-    const importedCollections = [
-      { id: 'imported-collection-a', name: '导入收藏夹 A', createdAt: 1, updatedAt: 1 },
-      { id: 'imported-collection-b', name: '导入收藏夹 B', createdAt: 2, updatedAt: 2 },
-    ]
-    const importedTask = task({
-      id: 'imported-favorite-task',
-      isFavorite: true,
-      favoriteCollectionIds: [importedCollections[1].id],
-    })
-
-    const imported = await importData(importFile({
-      version: 3,
-      exportedAt: new Date(0).toISOString(),
-      tasks: [importedTask],
-      favoriteCollections: importedCollections,
-      defaultFavoriteCollectionId: importedCollections[1].id,
-      imageFiles: {},
-    }), { importConfig: false, importTasks: true })
-
-    const state = useStore.getState()
-    expect(imported).toBe(true)
-    expect(state.favoriteCollections).toEqual(expect.arrayContaining(importedCollections))
-    expect(state.defaultFavoriteCollectionId).toBe(importedCollections[1].id)
-    expect(state.tasks.find((item) => item.id === importedTask.id)).toMatchObject({
-      favoriteCollectionIds: [importedCollections[1].id],
-      isFavorite: true,
-    })
-    expect((await getAllTasks()).find((item) => item.id === importedTask.id)).toMatchObject({
-      favoriteCollectionIds: [importedCollections[1].id],
-      isFavorite: true,
-    })
-  })
-
-  it('skips empty agent conversations when importing task data', async () => {
-    const usedConversation = agentConversation({
-      id: 'used-conversation',
-      activeRoundId: 'round-a',
-      rounds: [{
-        id: 'round-a',
-        index: 1,
-        parentRoundId: null,
-        userMessageId: 'message-a',
-        prompt: 'prompt',
-        inputImageIds: [],
-        outputTaskIds: [],
-        status: 'done',
-        error: null,
-        createdAt: 1,
-        finishedAt: 2,
-      }],
-      messages: [{ id: 'message-a', role: 'user', content: 'prompt', roundId: 'round-a', createdAt: 1 }],
-    })
-
-    const imported = await importData(importFile({
-      version: 3,
-      exportedAt: new Date(0).toISOString(),
-      tasks: [],
-      agentConversations: [
-        agentConversation({ id: 'empty-conversation' }),
-        usedConversation,
-      ],
-      imageFiles: {},
-    }), { importConfig: false, importTasks: true })
-
-    const state = useStore.getState()
-    expect(imported).toBe(true)
-    expect(state.agentConversations.map((conversation) => conversation.id)).toEqual(['used-conversation'])
-    expect(state.activeAgentConversationId).toBe('used-conversation')
-  })
-
-  it('merges imported agent conversations without replacing local conversations', async () => {
-    const localConversation = agentConversation({
-      id: 'local-conversation',
-      title: '本地对话',
-      createdAt: 1,
-      updatedAt: 1,
-    })
-    const importedConversation = agentConversation({
-      id: 'imported-conversation',
-      activeRoundId: 'round-a',
-      rounds: [{
-        id: 'round-a',
-        index: 1,
-        parentRoundId: null,
-        userMessageId: 'message-a',
-        prompt: 'imported prompt',
-        inputImageIds: [],
-        outputTaskIds: [],
-        status: 'done',
-        error: null,
-        createdAt: 2,
-        finishedAt: 3,
-      }],
-      messages: [{ id: 'message-a', role: 'user', content: 'imported prompt', roundId: 'round-a', createdAt: 2 }],
-    })
-    useStore.setState({
-      agentConversations: [localConversation],
-      activeAgentConversationId: localConversation.id,
-    })
-
-    const imported = await importData(importFile({
-      version: 3,
-      exportedAt: new Date(0).toISOString(),
-      tasks: [],
-      agentConversations: [importedConversation],
-      imageFiles: {},
-    }), { importConfig: false, importTasks: true })
-
-    const state = useStore.getState()
-    expect(imported).toBe(true)
-    expect(state.agentConversations.map((conversation) => conversation.id)).toEqual(['local-conversation', 'imported-conversation'])
-    expect(state.activeAgentConversationId).toBe('local-conversation')
-  })
-
-  it('stores imported legacy agent conversations in IndexedDB without localStorage or image payloads', async () => {
-    const importedConversation = agentConversation({
-      id: 'legacy-imported-conversation',
-      activeRoundId: 'round-a',
-      rounds: [{
-        id: 'round-a',
-        index: 1,
-        parentRoundId: null,
-        userMessageId: 'message-a',
-        prompt: 'imported prompt',
-        inputImageIds: [],
-        outputTaskIds: ['task-a'],
-        responseOutput: [
-          { type: 'message', content: [{ type: 'output_text', text: '已生成图片。' }] },
-          { type: 'image_generation_call', id: 'image-call-a', result: { base64: 'imported-legacy-base64' } },
-        ],
-        status: 'done',
-        error: null,
-        createdAt: 2,
-        finishedAt: 3,
-      }],
-      messages: [{ id: 'message-a', role: 'user', content: 'imported prompt', roundId: 'round-a', createdAt: 2 }],
-    })
-
-    const imported = await importData(importFile({
-      version: 2,
-      exportedAt: new Date(0).toISOString(),
-      tasks: [],
-      agentConversations: [importedConversation],
-      imageFiles: {},
-    }), { importConfig: false, importTasks: true })
-
-    const indexedConversations = await getAllAgentConversations()
-    const persisted = getPersistedState(useStore.getState())
-    const serializedIndexedConversations = JSON.stringify(indexedConversations)
-    const serializedPersisted = JSON.stringify(persisted)
-
-    expect(imported).toBe(true)
-    expect(indexedConversations.map((conversation) => conversation.id)).toEqual(['legacy-imported-conversation'])
-    expect(serializedIndexedConversations).toContain('image_generation_call')
-    expect(serializedIndexedConversations).not.toContain('imported-legacy-base64')
-    expect('agentConversations' in persisted).toBe(false)
-    expect(serializedPersisted).not.toContain('image_generation_call')
-    expect(serializedPersisted).not.toContain('imported-legacy-base64')
-  })
-
 })
 
 describe('agent draft lifecycle', () => {

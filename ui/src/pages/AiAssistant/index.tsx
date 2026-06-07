@@ -72,7 +72,6 @@ const Index = () => {
       ?.offsetHeight;
     const neededSpace = viewportHeight - senderHeight - navHeight - 120;
     const height = neededSpace;
-    console.log('lasMsgHeight', height);
 
     setTemporaryBottomSpace(height);
   };

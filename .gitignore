@@ -27,8 +27,10 @@ tmp
 vendor/
 /answer-data/
 /answer
+/answer-*
 /new_answer
 build/tools/
+build/release/
 dist/
 
 # Lint setup generated file

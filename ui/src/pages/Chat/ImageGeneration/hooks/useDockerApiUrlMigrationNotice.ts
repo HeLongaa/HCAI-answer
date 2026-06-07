@@ -8,8 +8,8 @@ export function useDockerApiUrlMigrationNotice() {
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
 
   useEffect(() => {
-    if (readRuntimeEnv(undefined) !== 'true') return
-    if (readRuntimeEnv(undefined) !== 'true') return
+    if (readRuntimeEnv('VITE_DOCKER_DEPLOYMENT') !== 'true') return
+    if (readRuntimeEnv('VITE_LEGACY_API_URL_COMPAT') !== 'true') return
     if (localStorage.getItem(NOTICE_KEY) === 'true') return
 
     const dismiss = () => {

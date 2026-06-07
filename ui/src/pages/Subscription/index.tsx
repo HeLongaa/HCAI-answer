@@ -154,7 +154,7 @@ const Subscription: FC = () => {
       <header className="hcai-subscription-page-head">
         <div>
           <h1>订阅购买</h1>
-          <p>按开通时间计算一个月周期，聊天点数、生图和视频额度独立计算。</p>
+          <p>额度按自然月统计，聊天点数、生图和视频额度独立计算。</p>
         </div>
         <span>购买进行订阅兑换即可生效</span>
       </header>

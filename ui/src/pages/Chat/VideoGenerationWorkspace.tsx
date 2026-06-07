@@ -130,6 +130,22 @@ const formatQuota = (value?: number) => {
   return Number(value || 0).toLocaleString();
 };
 
+const normalizeVideoGenerationError = (err: any) => {
+  const rawMessage =
+    typeof err?.msg === 'string'
+      ? err.msg
+      : err instanceof Error
+        ? err.message
+        : '';
+  if (rawMessage.includes('today video quota is insufficient')) {
+    return '今日视频额度不足，请升级或兑换订阅';
+  }
+  if (rawMessage.includes('monthly video quota is insufficient')) {
+    return '本月视频额度不足，请升级或兑换订阅';
+  }
+  return rawMessage || '视频生成失败，请检查模型配置或稍后重试';
+};
+
 const getModelName = (model?: AiVideoModel) => {
   if (!model) {
     return '选择模型';
@@ -715,6 +731,7 @@ const VideoGenerationWorkspace: FC<IProps> = ({
       refreshVideoGenerations().catch(() => undefined);
       onRefreshSubscription();
     } catch (err: any) {
+      const errorMessage = normalizeVideoGenerationError(err);
       setTasks((prev) =>
         prev.map((item) =>
           item.id === task.id
@@ -722,12 +739,12 @@ const VideoGenerationWorkspace: FC<IProps> = ({
                 ...item,
                 status: 'failed',
                 progress: 100,
-                error: err?.msg || '视频生成失败，请检查模型配置或稍后重试',
+                error: errorMessage,
               }
             : item,
         ),
       );
-      setError(err?.msg || '视频生成失败，请检查模型配置或稍后重试');
+      setError(errorMessage);
     } finally {
       setGenerating(false);
     }

@@ -261,7 +261,9 @@ func (qs *QuestionCommon) Info(ctx context.Context, questionID string, loginUser
 		return resp, errors.NotFound(reason.QuestionNotFound)
 	}
 	resp = qs.ShowFormat(ctx, questionInfo)
-	qs.fillFeaturedStatus(ctx, []*schema.QuestionInfoResp{resp})
+	if err = qs.fillFeaturedStatus(ctx, []*schema.QuestionInfoResp{resp}); err != nil {
+		return resp, err
+	}
 	if resp.Status == entity.QuestionStatusClosed {
 		metaInfo, err := qs.metaCommonService.GetMetaByObjectIdAndKey(ctx, questionInfo.ID, entity.QuestionCloseReasonKey)
 		if err != nil {
@@ -368,6 +370,7 @@ func (qs *QuestionCommon) FormatQuestionsPage(
 	formattedQuestions = make([]*schema.QuestionPageResp, 0)
 	questionIDs := make([]string, 0)
 	userIDs := make([]string, 0)
+	lastAnswerIDs := make([]string, 0)
 	for _, questionInfo := range questionList {
 		t := &schema.QuestionPageResp{
 			ID:               questionInfo.ID,
@@ -398,17 +401,7 @@ func (qs *QuestionCommon) FormatQuestionsPage(
 		}
 		if checker.IsNotZeroString(questionInfo.LastAnswerID) {
 			haveAnswered = true
-
-			answerInfo, exist, err := qs.answerRepo.GetAnswer(ctx, questionInfo.LastAnswerID)
-			if err == nil && exist {
-				if answerInfo.LastEditUserID != "0" {
-					t.LastAnsweredUserID = answerInfo.LastEditUserID
-				} else {
-					t.LastAnsweredUserID = answerInfo.UserID
-				}
-				t.LastAnsweredAt = answerInfo.CreatedAt
-				userIDs = append(userIDs, t.LastAnsweredUserID)
-			}
+			lastAnswerIDs = append(lastAnswerIDs, questionInfo.LastAnswerID)
 		}
 
 		// The default operation is to ask questions
@@ -433,6 +426,34 @@ func (qs *QuestionCommon) FormatQuestionsPage(
 		}
 
 		formattedQuestions = append(formattedQuestions, t)
+	}
+	answerMap := make(map[string]*entity.Answer, len(lastAnswerIDs))
+	if len(lastAnswerIDs) > 0 {
+		answers, err := qs.answerRepo.GetByIDs(ctx, lastAnswerIDs...)
+		if err != nil {
+			return formattedQuestions, err
+		}
+		for _, answerInfo := range answers {
+			answerMap[uid.DeShortID(answerInfo.ID)] = answerInfo
+		}
+		for _, item := range formattedQuestions {
+			answerInfo, exist := answerMap[item.LastAnswerID]
+			if !exist {
+				continue
+			}
+			if answerInfo.LastEditUserID != "0" {
+				item.LastAnsweredUserID = answerInfo.LastEditUserID
+			} else {
+				item.LastAnsweredUserID = answerInfo.UserID
+			}
+			item.LastAnsweredAt = answerInfo.CreatedAt
+			userIDs = append(userIDs, item.LastAnsweredUserID)
+			if orderCond == schema.QuestionOrderCondActive && item.LastAnsweredAt.Unix() > item.OperatedAt {
+				item.OperationType = schema.QuestionPageRespOperationTypeAnswered
+				item.OperatedAt = item.LastAnsweredAt.Unix()
+				item.Operator = &schema.QuestionPageRespOperator{ID: item.LastAnsweredUserID}
+			}
+		}
 	}
 
 	tagsMap, err := qs.tagCommon.BatchGetObjectTag(ctx, questionIDs)
@@ -462,7 +483,9 @@ func (qs *QuestionCommon) FormatQuestionsPage(
 			}
 		}
 	}
-	qs.fillFeaturedPageStatus(ctx, formattedQuestions)
+	if err = qs.fillFeaturedPageStatus(ctx, formattedQuestions); err != nil {
+		return formattedQuestions, err
+	}
 	return formattedQuestions, nil
 }
 
@@ -493,7 +516,9 @@ func (qs *QuestionCommon) FormatQuestions(ctx context.Context, questionList []*e
 		item.UpdateUserInfo = userInfoMap[item.LastEditUserID]
 		item.LastAnsweredUserInfo = userInfoMap[item.LastAnsweredUserID]
 	}
-	qs.fillFeaturedStatus(ctx, list)
+	if err = qs.fillFeaturedStatus(ctx, list); err != nil {
+		return list, err
+	}
 	if loginUserID == "" {
 		return list, nil
 	}
@@ -508,9 +533,9 @@ func (qs *QuestionCommon) FormatQuestions(ctx context.Context, questionList []*e
 	return list, nil
 }
 
-func (qs *QuestionCommon) fillFeaturedStatus(ctx context.Context, list []*schema.QuestionInfoResp) {
+func (qs *QuestionCommon) fillFeaturedStatus(ctx context.Context, list []*schema.QuestionInfoResp) error {
 	if len(list) == 0 || qs.data == nil || qs.data.DB == nil {
-		return
+		return nil
 	}
 	questionIDs := make([]string, 0, len(list))
 	itemMap := make(map[string]*schema.QuestionInfoResp, len(list))
@@ -523,22 +548,22 @@ func (qs *QuestionCommon) fillFeaturedStatus(ctx context.Context, list []*schema
 	featuredPosts := make([]*entity.FeaturedPost, 0)
 	err := qs.data.DB.Context(ctx).
 		In("question_id", questionIDs).
-		Where("active = ? AND revoked = ?", true, false).
+		Where("active = ? AND revoked = ?", 1, 0).
 		Find(&featuredPosts)
 	if err != nil {
-		log.Errorf("get featured post status error: %v", err)
-		return
+		return err
 	}
 	for _, featured := range featuredPosts {
 		if item, ok := itemMap[featured.QuestionID]; ok {
 			item.Featured = true
 		}
 	}
+	return nil
 }
 
-func (qs *QuestionCommon) fillFeaturedPageStatus(ctx context.Context, list []*schema.QuestionPageResp) {
+func (qs *QuestionCommon) fillFeaturedPageStatus(ctx context.Context, list []*schema.QuestionPageResp) error {
 	if len(list) == 0 || qs.data == nil || qs.data.DB == nil {
-		return
+		return nil
 	}
 	questionIDs := make([]string, 0, len(list))
 	itemMap := make(map[string]*schema.QuestionPageResp, len(list))
@@ -551,17 +576,17 @@ func (qs *QuestionCommon) fillFeaturedPageStatus(ctx context.Context, list []*sc
 	featuredPosts := make([]*entity.FeaturedPost, 0)
 	err := qs.data.DB.Context(ctx).
 		In("question_id", questionIDs).
-		Where("active = ? AND revoked = ?", true, false).
+		Where("active = ? AND revoked = ?", 1, 0).
 		Find(&featuredPosts)
 	if err != nil {
-		log.Errorf("get featured post page status error: %v", err)
-		return
+		return err
 	}
 	for _, featured := range featuredPosts {
 		if item, ok := itemMap[featured.QuestionID]; ok {
 			item.Featured = true
 		}
 	}
+	return nil
 }
 
 // RemoveQuestion delete question

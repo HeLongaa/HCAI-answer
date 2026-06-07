@@ -120,7 +120,7 @@ func (qc *QuestionController) RemoveQuestion(ctx *gin.Context) {
 	}
 	err = qc.questionService.RemoveQuestion(ctx, req)
 	if err == nil && qc.taskSquareService != nil {
-		err = qc.taskSquareService.RevokeFeaturedPostReward(ctx, req.ID, req.UserID)
+		err = qc.taskSquareService.RevokeFeaturedPostRewardIfExists(ctx, req.ID, req.UserID)
 	}
 	if !isAdmin {
 		qc.actionService.ActionRecordAdd(ctx, entity.CaptchaActionDelete, req.UserID)
@@ -166,7 +166,18 @@ func (qc *QuestionController) OperationQuestion(ctx *gin.Context) {
 		return
 	}
 	err = qc.questionService.OperationQuestion(ctx, req)
+	if err == nil && req.Operation == schema.QuestionOperationHide && qc.taskSquareService != nil && qc.questionIsHidden(ctx, req.ID, req.UserID) {
+		err = qc.taskSquareService.RevokeFeaturedPostRewardIfExists(ctx, req.ID, req.UserID)
+	}
 	handler.HandleResponse(ctx, err, nil)
+}
+
+func (qc *QuestionController) questionIsHidden(ctx *gin.Context, questionID, userID string) bool {
+	question, err := qc.questionService.GetQuestion(ctx, questionID, userID, schema.QuestionPermission{
+		IsAdminModerator: true,
+		CanReopen:        true,
+	})
+	return err == nil && question != nil && question.Show == entity.QuestionHide
 }
 
 // CloseQuestion Close question
@@ -994,6 +1005,10 @@ func (qc *QuestionController) AdminUpdateQuestionStatus(ctx *gin.Context) {
 	req.UserID = middleware.GetLoginUserIDFromContext(ctx)
 
 	err := qc.questionService.AdminSetQuestionStatus(ctx, req)
+	if err == nil && qc.taskSquareService != nil &&
+		(req.Status == "deleted" || req.Status == "pending") {
+		err = qc.taskSquareService.RevokeFeaturedPostRewardIfExists(ctx, req.QuestionID, req.UserID)
+	}
 	handler.HandleResponse(ctx, err, nil)
 }
 

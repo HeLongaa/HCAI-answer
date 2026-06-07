@@ -908,6 +908,93 @@ export interface AiChatModel {
   supports_vision: boolean;
 }
 
+export interface AdminAiProviderModel {
+  id: number;
+  provider_id: number;
+  provider_model_id: string;
+  model_name: string;
+  enabled: boolean;
+  fetched_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminAiProvider {
+  id: number;
+  name: string;
+  base_url: string;
+  api_key: string;
+  enabled: boolean;
+  supports_stream: boolean;
+  remark: string;
+  models: AdminAiProviderModel[];
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminAiProviderParams {
+  name: string;
+  base_url: string;
+  api_key?: string;
+  enabled: boolean;
+  supports_stream: boolean;
+  remark: string;
+}
+
+export interface AdminAiModelMappingItem {
+  id: number;
+  mapping_id: number;
+  provider_id: number;
+  provider_name: string;
+  provider_model_id: string;
+  priority: number;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminAiModelMapping {
+  id: number;
+  site_model_id: string;
+  display_name: string;
+  description: string;
+  enabled: boolean;
+  sort_order: number;
+  supports_vision: boolean;
+  fallback_enabled: boolean;
+  default_provider_model_id: string;
+  items: AdminAiModelMappingItem[];
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminAiModelMappingItemParams {
+  provider_id: number;
+  provider_model_id: string;
+  priority: number;
+  enabled: boolean;
+}
+
+export interface AdminAiModelMappingParams {
+  site_model_id: string;
+  display_name: string;
+  description: string;
+  enabled: boolean;
+  sort_order: number;
+  supports_vision: boolean;
+  fallback_enabled: boolean;
+  default_provider_model_id: string;
+  items: AdminAiModelMappingItemParams[];
+}
+
+export interface AdminAiTestProviderModelResult {
+  provider_id: number;
+  provider_model_id: string;
+  message: string;
+  raw_response: string;
+  error?: string;
+}
+
 export interface AiImageModel {
   id: number;
   provider_id: number;
@@ -940,6 +1027,64 @@ export interface AiImageModelUpstream {
   responses_model_id: string;
   weight: number;
   enabled: boolean;
+}
+
+export interface AdminAiImageModelUpstreamParams {
+  provider_id: number;
+  provider_model_id: string;
+  agent_model_id: string;
+  responses_model_id: string;
+  weight: number;
+  enabled: boolean;
+}
+
+export interface AdminAiImageModelParams {
+  provider_id: number;
+  site_model_id: string;
+  provider_model_id: string;
+  agent_model_id: string;
+  display_name: string;
+  description: string;
+  default_size: string;
+  api_mode: 'images' | 'responses';
+  supports_edits: boolean;
+  supports_references: boolean;
+  supports_stream: boolean;
+  default_quality: string;
+  default_format: string;
+  extra_config: string;
+  enabled: boolean;
+  sort_order: number;
+  upstreams: AdminAiImageModelUpstreamParams[];
+}
+
+export interface AdminAiImageProvider {
+  id: number;
+  name: string;
+  base_url: string;
+  api_key: string;
+  enabled: boolean;
+  remark: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminAiImageProviderParams {
+  name: string;
+  base_url: string;
+  api_key?: string;
+  enabled: boolean;
+  remark: string;
+}
+
+export interface AdminAiImageSetting {
+  retention_days: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminAiImageSettingParams {
+  retention_days: number;
 }
 
 export interface AiImageGeneration {
@@ -1060,6 +1205,35 @@ export interface AiVideoModel {
   updated_at: number;
 }
 
+export interface AdminAiVideoProvider {
+  id: number;
+  name: string;
+  base_url: string;
+  api_key: string;
+  enabled: boolean;
+  remark: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminAiVideoProviderParams {
+  name: string;
+  base_url: string;
+  api_key?: string;
+  enabled: boolean;
+  remark: string;
+}
+
+export interface AdminAiVideoSetting {
+  retention_days: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminAiVideoSettingParams {
+  retention_days: number;
+}
+
 export interface AiVideoGeneration {
   id: number;
   generation_id: string;
@@ -1143,6 +1317,78 @@ export interface AiSubscriptionPlan {
   sort_order: number;
   created_at: number;
   updated_at: number;
+}
+
+export interface AiSubscriptionPlanParams {
+  plan_id: string;
+  name: string;
+  enabled: boolean;
+  monthly_price: number;
+  chat_points: number;
+  image_quota: number;
+  video_daily_quota: number;
+  video_quota: number;
+  purchase_url: string;
+  model_mapping_ids: number[];
+  task_description: string;
+  sort_order: number;
+}
+
+export interface AiSubscriptionRedeemCode {
+  id: number;
+  code: string;
+  plan_id: number;
+  plan_key: string;
+  plan_name: string;
+  duration_months: number;
+  enabled: boolean;
+  used: boolean;
+  used_by_user_id: string;
+  used_at: number;
+  batch_no: string;
+  remark: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AiSubscriptionRedeemCodeGenerateParams {
+  plan_id: number;
+  count: number;
+  duration_months: number;
+  prefix: string;
+  remark: string;
+}
+
+export interface AiModelConsumeRate {
+  id: number;
+  model_mapping_id: number;
+  site_model_id: string;
+  consume_rate: number;
+  enabled: boolean;
+  remark: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AiModelConsumeRateParams {
+  model_mapping_id: number;
+  consume_rate: number;
+  enabled: boolean;
+  remark: string;
+}
+
+export interface AdminAiVideoModelParams {
+  provider_id: number;
+  site_model_id: string;
+  provider_model_id: string;
+  display_name: string;
+  description: string;
+  default_size: string;
+  default_seconds: number;
+  default_resolution: string;
+  default_preset: string;
+  enabled: boolean;
+  sort_order: number;
 }
 
 export interface AiSubscriptionPurchase {

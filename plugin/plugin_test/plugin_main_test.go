@@ -57,7 +57,7 @@ var (
 	}
 	sqlite3DBSetting = TestDBSetting{
 		Driver:     string(schemas.SQLITE),
-		Connection: filepath.Join(os.TempDir(), "answer-test-data.db"),
+		Connection: filepath.Join(os.TempDir(), "answer-plugin-test-data.db"),
 	}
 	dbSettingMapping = map[string]TestDBSetting{
 		mysqlDBSetting.Driver:    mysqlDBSetting,
@@ -77,7 +77,14 @@ func TestMain(t *testing.M) {
 		// Use sqlite3 to test.
 		dbSetting = dbSettingMapping[string(schemas.SQLITE)]
 	}
+	sqliteTempDir := ""
 	if dbSetting.Driver == string(schemas.SQLITE) {
+		var err error
+		sqliteTempDir, err = os.MkdirTemp("", "answer-plugin-test-*")
+		if err != nil {
+			panic(err)
+		}
+		dbSetting.Connection = filepath.Join(sqliteTempDir, "answer-test-data.db")
 		_ = os.RemoveAll(dbSetting.Connection)
 	}
 
@@ -89,6 +96,9 @@ func TestMain(t *testing.M) {
 	ret := t.Run()
 	if tearDown != nil {
 		tearDown()
+	}
+	if sqliteTempDir != "" {
+		_ = os.RemoveAll(sqliteTempDir)
 	}
 	os.Exit(ret)
 }

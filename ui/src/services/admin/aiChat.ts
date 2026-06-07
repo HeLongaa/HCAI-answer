@@ -18,18 +18,22 @@
  */
 
 import request from '@/utils/request';
+import type * as Type from '@/common/interface';
 
 const base = '/answer/admin/api/ai-chat';
 
 export const getAiChatProviders = () => {
-  return request.get<any[]>(`${base}/providers`);
+  return request.get<Type.AdminAiProvider[]>(`${base}/providers`);
 };
 
-export const createAiChatProvider = (params) => {
+export const createAiChatProvider = (params: Type.AdminAiProviderParams) => {
   return request.post(`${base}/providers`, params);
 };
 
-export const updateAiChatProvider = (id: number, params) => {
+export const updateAiChatProvider = (
+  id: number,
+  params: Type.AdminAiProviderParams,
+) => {
   return request.put(`${base}/providers/${id}`, params);
 };
 
@@ -38,25 +42,35 @@ export const deleteAiChatProvider = (id: number) => {
 };
 
 export const fetchAiChatProviderModels = (id: number) => {
-  return request.post(`${base}/providers/${id}/fetch-models`);
+  return request.post<Type.AdminAiProviderModel[]>(
+    `${base}/providers/${id}/fetch-models`,
+  );
 };
 
 export const testAiChatProviderModel = (
   id: number,
   params: { provider_model_id: string },
 ) => {
-  return request.post(`${base}/providers/${id}/test-model`, params);
+  return request.post<Type.AdminAiTestProviderModelResult>(
+    `${base}/providers/${id}/test-model`,
+    params,
+  );
 };
 
 export const getAiChatModelMappings = () => {
-  return request.get<any[]>(`${base}/model-mappings`);
+  return request.get<Type.AdminAiModelMapping[]>(`${base}/model-mappings`);
 };
 
-export const createAiChatModelMapping = (params) => {
+export const createAiChatModelMapping = (
+  params: Type.AdminAiModelMappingParams,
+) => {
   return request.post(`${base}/model-mappings`, params);
 };
 
-export const updateAiChatModelMapping = (id: number, params) => {
+export const updateAiChatModelMapping = (
+  id: number,
+  params: Type.AdminAiModelMappingParams,
+) => {
   return request.put(`${base}/model-mappings/${id}`, params);
 };
 
@@ -65,14 +79,19 @@ export const deleteAiChatModelMapping = (id: number) => {
 };
 
 export const getAiChatSubscriptionPlans = () => {
-  return request.get<any[]>(`${base}/subscription-plans`);
+  return request.get<Type.AiSubscriptionPlan[]>(`${base}/subscription-plans`);
 };
 
-export const createAiChatSubscriptionPlan = (params) => {
+export const createAiChatSubscriptionPlan = (
+  params: Type.AiSubscriptionPlanParams,
+) => {
   return request.post(`${base}/subscription-plans`, params);
 };
 
-export const updateAiChatSubscriptionPlan = (id: number, params) => {
+export const updateAiChatSubscriptionPlan = (
+  id: number,
+  params: Type.AiSubscriptionPlanParams,
+) => {
   return request.put(`${base}/subscription-plans/${id}`, params);
 };
 
@@ -81,34 +100,49 @@ export const deleteAiChatSubscriptionPlan = (id: number) => {
 };
 
 export const getAiChatRedeemCodes = () => {
-  return request.get<any[]>(`${base}/redeem-codes`);
+  return request.get<Type.AiSubscriptionRedeemCode[]>(`${base}/redeem-codes`);
 };
 
-export const generateAiChatRedeemCodes = (params) => {
-  return request.post<any[]>(`${base}/redeem-codes/generate`, params);
+export const generateAiChatRedeemCodes = (
+  params: Type.AiSubscriptionRedeemCodeGenerateParams,
+) => {
+  return request.post<Type.AiSubscriptionRedeemCode[]>(
+    `${base}/redeem-codes/generate`,
+    params,
+  );
 };
 
 export const getAiChatConsumeRates = () => {
-  return request.get<any[]>(`${base}/consume-rates`);
+  return request.get<Type.AiModelConsumeRate[]>(`${base}/consume-rates`);
 };
 
-export const createAiChatConsumeRate = (params) => {
+export const createAiChatConsumeRate = (
+  params: Type.AiModelConsumeRateParams,
+) => {
   return request.post(`${base}/consume-rates`, params);
 };
 
-export const updateAiChatConsumeRate = (id: number, params) => {
+export const updateAiChatConsumeRate = (
+  id: number,
+  params: Type.AiModelConsumeRateParams,
+) => {
   return request.put(`${base}/consume-rates/${id}`, params);
 };
 
 export const getAdminAiImageProviders = () => {
-  return request.get<any[]>(`${base}/image-providers`);
+  return request.get<Type.AdminAiImageProvider[]>(`${base}/image-providers`);
 };
 
-export const createAdminAiImageProvider = (params) => {
+export const createAdminAiImageProvider = (
+  params: Type.AdminAiImageProviderParams,
+) => {
   return request.post(`${base}/image-providers`, params);
 };
 
-export const updateAdminAiImageProvider = (id: number, params) => {
+export const updateAdminAiImageProvider = (
+  id: number,
+  params: Type.AdminAiImageProviderParams,
+) => {
   return request.put(`${base}/image-providers/${id}`, params);
 };
 
@@ -117,14 +151,19 @@ export const deleteAdminAiImageProvider = (id: number) => {
 };
 
 export const getAdminAiImageModels = () => {
-  return request.get<any[]>(`${base}/image-models`);
+  return request.get<Type.AiImageModel[]>(`${base}/image-models`);
 };
 
-export const createAdminAiImageModel = (params) => {
+export const createAdminAiImageModel = (
+  params: Type.AdminAiImageModelParams,
+) => {
   return request.post(`${base}/image-models`, params);
 };
 
-export const updateAdminAiImageModel = (id: number, params) => {
+export const updateAdminAiImageModel = (
+  id: number,
+  params: Type.AdminAiImageModelParams,
+) => {
   return request.put(`${base}/image-models/${id}`, params);
 };
 
@@ -133,22 +172,29 @@ export const deleteAdminAiImageModel = (id: number) => {
 };
 
 export const getAdminAiImageSetting = () => {
-  return request.get<any>(`${base}/image-setting`);
+  return request.get<Type.AdminAiImageSetting>(`${base}/image-setting`);
 };
 
-export const updateAdminAiImageSetting = (params) => {
+export const updateAdminAiImageSetting = (
+  params: Type.AdminAiImageSettingParams,
+) => {
   return request.put(`${base}/image-setting`, params);
 };
 
 export const getAdminAiVideoProviders = () => {
-  return request.get<any[]>(`${base}/video-providers`);
+  return request.get<Type.AdminAiVideoProvider[]>(`${base}/video-providers`);
 };
 
-export const createAdminAiVideoProvider = (params) => {
+export const createAdminAiVideoProvider = (
+  params: Type.AdminAiVideoProviderParams,
+) => {
   return request.post(`${base}/video-providers`, params);
 };
 
-export const updateAdminAiVideoProvider = (id: number, params) => {
+export const updateAdminAiVideoProvider = (
+  id: number,
+  params: Type.AdminAiVideoProviderParams,
+) => {
   return request.put(`${base}/video-providers/${id}`, params);
 };
 
@@ -157,14 +203,19 @@ export const deleteAdminAiVideoProvider = (id: number) => {
 };
 
 export const getAdminAiVideoModels = () => {
-  return request.get<any[]>(`${base}/video-models`);
+  return request.get<Type.AiVideoModel[]>(`${base}/video-models`);
 };
 
-export const createAdminAiVideoModel = (params) => {
+export const createAdminAiVideoModel = (
+  params: Type.AdminAiVideoModelParams,
+) => {
   return request.post(`${base}/video-models`, params);
 };
 
-export const updateAdminAiVideoModel = (id: number, params) => {
+export const updateAdminAiVideoModel = (
+  id: number,
+  params: Type.AdminAiVideoModelParams,
+) => {
   return request.put(`${base}/video-models/${id}`, params);
 };
 
@@ -173,9 +224,11 @@ export const deleteAdminAiVideoModel = (id: number) => {
 };
 
 export const getAdminAiVideoSetting = () => {
-  return request.get<any>(`${base}/video-setting`);
+  return request.get<Type.AdminAiVideoSetting>(`${base}/video-setting`);
 };
 
-export const updateAdminAiVideoSetting = (params) => {
+export const updateAdminAiVideoSetting = (
+  params: Type.AdminAiVideoSettingParams,
+) => {
   return request.put(`${base}/video-setting`, params);
 };

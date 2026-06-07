@@ -65,10 +65,6 @@ const Index: FC<Props> = ({
       const plugins = PluginKit.getPlugins().filter(
         (plugin) => plugin.activated,
       );
-      console.log(
-        '[PluginRender] Loaded plugins:',
-        plugins.map((p) => p.info.slug_name),
-      );
       const filtered: Plugin[] = [];
 
       plugins.forEach((plugin) => {

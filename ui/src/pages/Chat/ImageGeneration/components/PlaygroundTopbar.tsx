@@ -6,6 +6,12 @@ import { ChevronLeftIcon, CollectionManageIcon, EditIcon, FavoriteIcon } from '.
 import PlaygroundToolbarControls from './PlaygroundToolbarControls'
 
 type PlaygroundTopbarMode = 'gallery' | 'agent'
+const FILTER_STATUS_VALUES = ['all', 'running', 'done', 'error'] as const
+type FilterStatus = (typeof FILTER_STATUS_VALUES)[number]
+
+function isFilterStatus(value: string | number): value is FilterStatus {
+  return typeof value === 'string' && FILTER_STATUS_VALUES.includes(value as FilterStatus)
+}
 
 interface Props {
   mode: PlaygroundTopbarMode
@@ -66,7 +72,9 @@ export default function PlaygroundTopbar({ mode }: Props) {
               <div className="hcai-playground-status-wrap relative">
                 <Select
                   value={filterStatus}
-                  onChange={(val) => setFilterStatus(val as any)}
+                  onChange={(val) => {
+                    if (isFilterStatus(val)) setFilterStatus(val)
+                  }}
                   options={[
                     { label: '全部状态', value: 'all' },
                     { label: '已完成', value: 'done' },

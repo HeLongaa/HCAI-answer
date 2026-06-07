@@ -121,11 +121,6 @@ class Plugins {
   }
 
   async registerPlugins() {
-    console.log(
-      '[PluginKit] Registered plugins from API:',
-      this.registeredPlugins.map((p) => p.slug_name),
-    );
-
     const pluginLoaders = this.registeredPlugins
       .map((p) => {
         const func = allPlugins[p.slug_name];
@@ -138,11 +133,6 @@ class Plugins {
       })
       .filter((p) => p.loader);
 
-    console.log(
-      '[PluginKit] Found plugin loaders:',
-      pluginLoaders.map((p) => p.slug_name),
-    );
-
     // Use Promise.allSettled to prevent one plugin failure from breaking all plugins
     const results = await Promise.allSettled(
       pluginLoaders.map((p) => p.loader()),
@@ -150,9 +140,6 @@ class Plugins {
 
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') {
-        console.log(
-          `[PluginKit] Successfully loaded plugin: ${pluginLoaders[index].slug_name}`,
-        );
         this.register(result.value);
       } else {
         console.error(

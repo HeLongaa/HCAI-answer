@@ -198,7 +198,6 @@ const requestAi = async (url: string, options: RequestAiOptions) => {
 
     // get the authentication information and language settings (consistent with request.ts)
     const token = Storage.get(LOGGED_TOKEN_STORAGE_KEY) || '';
-    console.log(token);
     const lang = getCurrentLang();
 
     const response = await fetch(url, {
@@ -296,7 +295,6 @@ const requestAi = async (url: string, options: RequestAiOptions) => {
       console.error('Request AI Error:', errorMessage);
       options.onError?.(new Error(errorMessage));
     } else {
-      console.log('Request was cancelled by user');
       options.onComplete?.(); // cancellation is also considered complete
     }
   } finally {
@@ -309,7 +307,6 @@ const requestAi = async (url: string, options: RequestAiOptions) => {
 const cancelCurrentRequest = () => {
   if (requestState.abortController) {
     requestState.abortController.abort();
-    console.log('AI request cancelled by user');
     return true;
   }
   return false;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateImageSize } from '../../../../../src/pages/Chat/ImageGeneration/lib/size'
+import { calculateImageSize } from '@/pages/Chat/ImageGeneration/lib/size'
 
 describe('calculateImageSize', () => {
   it('uses common 16:9 display resolutions for the built-in tiers', () => {

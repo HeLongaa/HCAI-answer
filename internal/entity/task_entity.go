@@ -77,9 +77,9 @@ func (UserPointAccount) TableName() string {
 type PointTransaction struct {
 	ID          int       `xorm:"not null pk autoincr INT(11) id"`
 	CreatedAt   time.Time `xorm:"created not null default CURRENT_TIMESTAMP TIMESTAMP created_at"`
-	UserID      string    `xorm:"not null default 0 BIGINT(20) INDEX user_id"`
-	SourceType  string    `xorm:"not null default '' VARCHAR(64) INDEX source_type"`
-	SourceID    string    `xorm:"not null default '' VARCHAR(64) INDEX source_id"`
+	UserID      string    `xorm:"not null default 0 BIGINT(20) INDEX UNIQUE(point_source) user_id"`
+	SourceType  string    `xorm:"not null default '' VARCHAR(64) INDEX UNIQUE(point_source) source_type"`
+	SourceID    string    `xorm:"not null default '' VARCHAR(64) INDEX UNIQUE(point_source) source_id"`
 	Delta       int       `xorm:"not null default 0 INT(11) delta"`
 	Balance     int       `xorm:"not null default 0 INT(11) balance"`
 	Description string    `xorm:"TEXT description"`
@@ -94,7 +94,7 @@ type FeaturedPost struct {
 	ID           int       `xorm:"not null pk autoincr INT(11) id"`
 	CreatedAt    time.Time `xorm:"created not null default CURRENT_TIMESTAMP TIMESTAMP created_at"`
 	UpdatedAt    time.Time `xorm:"updated TIMESTAMP updated_at"`
-	QuestionID   string    `xorm:"not null default 0 BIGINT(20) UNIQUE question_id"`
+	QuestionID   string    `xorm:"not null default 0 BIGINT(20) INDEX question_id"`
 	AuthorID     string    `xorm:"not null default 0 BIGINT(20) INDEX author_id"`
 	OperatorID   string    `xorm:"not null default 0 BIGINT(20) operator_id"`
 	Title        string    `xorm:"not null default '' VARCHAR(150) title"`

@@ -21,7 +21,7 @@ func NewRealtimeController(realtimeService *realtime.Service) *RealtimeControlle
 
 func (c *RealtimeController) Events(ctx *gin.Context) {
 	userID := middleware.GetLoginUserIDFromContext(ctx)
-	events, unsubscribe := c.realtimeService.Subscribe(userID)
+	events, unsubscribe := c.realtimeService.Subscribe(userID, middleware.GetUserIsAdminModerator(ctx))
 	defer unsubscribe()
 
 	ctx.Header("Content-Type", "text/event-stream")
@@ -44,12 +44,24 @@ func (c *RealtimeController) Events(ctx *gin.Context) {
 		case <-ctx.Request.Context().Done():
 			return
 		case <-ticker.C:
-			_, _ = fmt.Fprint(ctx.Writer, ": ping\n\n")
+			if _, err := fmt.Fprint(ctx.Writer, ": ping\n\n"); err != nil {
+				return
+			}
 			flusher.Flush()
-		case event := <-events:
-			payload, _ := json.Marshal(event)
-			_, _ = fmt.Fprintf(ctx.Writer, "event: %s\n", event.Type)
-			_, _ = fmt.Fprintf(ctx.Writer, "data: %s\n\n", payload)
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			payload, err := json.Marshal(event)
+			if err != nil {
+				return
+			}
+			if _, err = fmt.Fprintf(ctx.Writer, "event: %s\n", event.Type); err != nil {
+				return
+			}
+			if _, err = fmt.Fprintf(ctx.Writer, "data: %s\n\n", payload); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}

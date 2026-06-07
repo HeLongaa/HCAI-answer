@@ -4,6 +4,7 @@ import { useSWRConfig } from 'swr';
 
 import { LOGGED_TOKEN_STORAGE_KEY } from '@/common/constants';
 import { REACT_BASE_PATH } from '@/router/alias';
+import { loggedUserInfoStore } from '@/stores';
 import Storage from '@/utils/storage';
 
 type RealtimeEvent = {
@@ -56,11 +57,35 @@ const refreshFragments: Record<string, string[]> = {
   ],
 };
 
+const keyToURLText = (key: unknown) => {
+  if (typeof key === 'string') {
+    return key;
+  }
+  if (Array.isArray(key) && typeof key[0] === 'string') {
+    return key[0];
+  }
+  return '';
+};
+
+const keyMatchesFragment = (keyText: string, fragment: string) => {
+  if (!keyText) {
+    return false;
+  }
+  return (
+    keyText === fragment ||
+    keyText.startsWith(`${fragment}?`) ||
+    keyText.startsWith(`${fragment}/`) ||
+    keyText.includes(`${fragment}?`) ||
+    keyText.includes(`${fragment}/`)
+  );
+};
+
 const RealtimeEvents: FC = () => {
   const { cache, mutate } = useSWRConfig();
+  const storeToken = loggedUserInfoStore((state) => state.user.access_token);
+  const token = storeToken || Storage.get(LOGGED_TOKEN_STORAGE_KEY);
 
   useEffect(() => {
-    const token = Storage.get(LOGGED_TOKEN_STORAGE_KEY);
     if (!token) {
       return undefined;
     }
@@ -86,8 +111,10 @@ const RealtimeEvents: FC = () => {
           ? Array.from((cache as any).keys())
           : [];
       keys.forEach((key) => {
-        const keyText = String(key);
-        if (fragments.some((fragment) => keyText.includes(fragment))) {
+        const keyText = keyToURLText(key);
+        if (
+          fragments.some((fragment) => keyMatchesFragment(keyText, fragment))
+        ) {
           mutate(key as any);
         }
       });
@@ -109,7 +136,7 @@ const RealtimeEvents: FC = () => {
     return () => {
       eventSource.close();
     };
-  }, [cache, mutate]);
+  }, [cache, mutate, token]);
 
   return null;
 };

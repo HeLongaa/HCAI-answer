@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_PARAMS } from '../../../../../src/pages/Chat/ImageGeneration/types'
-import { DEFAULT_SETTINGS } from '../../../../../src/pages/Chat/ImageGeneration/lib/apiProfiles'
-import { callImageApi } from '../../../../../src/pages/Chat/ImageGeneration/lib/api'
+import { DEFAULT_PARAMS } from '@/pages/Chat/ImageGeneration/types'
+import { DEFAULT_SETTINGS } from '@/pages/Chat/ImageGeneration/lib/apiProfiles'
+import { callImageApi } from '@/pages/Chat/ImageGeneration/lib/api'
 
 describe('callImageApi', () => {
   afterEach(() => {

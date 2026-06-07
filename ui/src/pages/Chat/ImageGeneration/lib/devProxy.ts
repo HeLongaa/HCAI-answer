@@ -87,11 +87,11 @@ export function readClientDevProxyConfig(): DevProxyConfig | null {
 }
 
 export function isApiProxyAvailable(proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {
-  return readRuntimeEnv(undefined) === 'true' || Boolean(proxyConfig?.enabled)
+  return readRuntimeEnv('VITE_API_PROXY_AVAILABLE') === 'true' || Boolean(proxyConfig?.enabled)
 }
 
 export function isApiProxyLocked(proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {
-  return readRuntimeEnv(undefined) === 'true' && isApiProxyAvailable(proxyConfig)
+  return readRuntimeEnv('VITE_API_PROXY_LOCKED') === 'true' && isApiProxyAvailable(proxyConfig)
 }
 
 export function shouldUseApiProxy(apiProxy: boolean, proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {

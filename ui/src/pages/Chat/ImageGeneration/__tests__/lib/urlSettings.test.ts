@@ -5,8 +5,8 @@ import {
   DEFAULT_IMAGES_MODEL,
   DEFAULT_SETTINGS,
   normalizeSettings,
-} from '../../../../../src/pages/Chat/ImageGeneration/lib/apiProfiles'
-import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from '../../../../../src/pages/Chat/ImageGeneration/lib/urlSettings'
+} from '@/pages/Chat/ImageGeneration/lib/apiProfiles'
+import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from '@/pages/Chat/ImageGeneration/lib/urlSettings'
 
 describe('URL settings params', () => {
   it('creates and activates a new OpenAI profile for legacy URL params', () => {

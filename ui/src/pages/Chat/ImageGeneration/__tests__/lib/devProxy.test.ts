@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildApiUrl } from '../../../../../src/pages/Chat/ImageGeneration/lib/devProxy'
+import { buildApiUrl } from '@/pages/Chat/ImageGeneration/lib/devProxy'
 
 describe('buildApiUrl', () => {
   it('uses the same-origin proxy prefix when API proxy is enabled', () => {

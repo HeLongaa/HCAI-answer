@@ -34,6 +34,7 @@ import {
 } from 'react-bootstrap';
 import { useSearchParams } from 'react-router-dom';
 
+import type * as Type from '@/common/interface';
 import { useToast } from '@/hooks';
 import {
   createAiChatConsumeRate,
@@ -154,6 +155,8 @@ const imageModelUpstreamInit = {
   enabled: true,
 };
 
+type ImageAPIMode = Type.AdminAiImageModelParams['api_mode'];
+
 const imageModelInit = {
   id: 0,
   provider_id: 0,
@@ -163,7 +166,7 @@ const imageModelInit = {
   display_name: '',
   description: '',
   default_size: '1024x1024',
-  api_mode: 'images',
+  api_mode: 'images' as ImageAPIMode,
   supports_edits: true,
   supports_references: true,
   supports_stream: false,
@@ -185,10 +188,13 @@ const newImageModelUpstream = (): ImageModelUpstreamForm => ({
       : `${Date.now()}-${Math.random()}`,
 });
 
-const normalizeImageModelUpstreams = (upstreams?: any[]) =>
+const normalizeImageModelUpstreams = (
+  upstreams?: Array<Type.AiImageModelUpstream | ImageModelUpstreamForm>,
+) =>
   (upstreams || [])
     .map((upstream, index) => ({
-      client_id: upstream.client_id || `saved-${index}`,
+      client_id:
+        'client_id' in upstream ? upstream.client_id : `saved-${index}`,
       provider_id: Number(upstream.provider_id || 0),
       provider_model_id: upstream.provider_model_id || '',
       agent_model_id: upstream.agent_model_id || '',
@@ -208,7 +214,7 @@ const imageSettingInit = {
 const videoProviderInit = {
   id: 0,
   name: '',
-  base_url: 'http://localhost:8000/v1',
+  base_url: 'https://api.openai.com/v1',
   api_key: '',
   enabled: true,
   remark: '',
@@ -264,15 +270,21 @@ const AiChatConfig = () => {
   const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromURL = searchParams.get('tab') || 'providers';
-  const [providers, setProviders] = useState<any[]>([]);
-  const [mappings, setMappings] = useState<any[]>([]);
-  const [plans, setPlans] = useState<any[]>([]);
-  const [redeemCodes, setRedeemCodes] = useState<any[]>([]);
-  const [rates, setRates] = useState<any[]>([]);
-  const [imageProviders, setImageProviders] = useState<any[]>([]);
-  const [imageModels, setImageModels] = useState<any[]>([]);
-  const [videoProviders, setVideoProviders] = useState<any[]>([]);
-  const [videoModels, setVideoModels] = useState<any[]>([]);
+  const [providers, setProviders] = useState<Type.AdminAiProvider[]>([]);
+  const [mappings, setMappings] = useState<Type.AdminAiModelMapping[]>([]);
+  const [plans, setPlans] = useState<Type.AiSubscriptionPlan[]>([]);
+  const [redeemCodes, setRedeemCodes] = useState<
+    Type.AiSubscriptionRedeemCode[]
+  >([]);
+  const [rates, setRates] = useState<Type.AiModelConsumeRate[]>([]);
+  const [imageProviders, setImageProviders] = useState<
+    Type.AdminAiImageProvider[]
+  >([]);
+  const [imageModels, setImageModels] = useState<Type.AiImageModel[]>([]);
+  const [videoProviders, setVideoProviders] = useState<
+    Type.AdminAiVideoProvider[]
+  >([]);
+  const [videoModels, setVideoModels] = useState<Type.AiVideoModel[]>([]);
   const [providerForm, setProviderForm] = useState(providerInit);
   const [mappingForm, setMappingForm] = useState(mappingInit);
   const [planForm, setPlanForm] = useState(planInit);
@@ -284,13 +296,17 @@ const AiChatConfig = () => {
   const [videoModelForm, setVideoModelForm] = useState(videoModelInit);
   const [videoSettingForm, setVideoSettingForm] = useState(videoSettingInit);
   const [redeemForm, setRedeemForm] = useState(redeemInit);
-  const [generatedCodes, setGeneratedCodes] = useState<any[]>([]);
+  const [generatedCodes, setGeneratedCodes] = useState<
+    Type.AiSubscriptionRedeemCode[]
+  >([]);
   const [activeTab, setActiveTab] = useState(
     tabKeys.includes(tabFromURL) ? tabFromURL : 'providers',
   );
-  const [testingProvider, setTestingProvider] = useState<any>(null);
+  const [testingProvider, setTestingProvider] =
+    useState<Type.AdminAiProvider | null>(null);
   const [testingModelID, setTestingModelID] = useState('');
-  const [testingResult, setTestingResult] = useState<any>(null);
+  const [testingResult, setTestingResult] =
+    useState<Type.AdminAiTestProviderModelResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [initialLoading, setInitialLoading] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -374,6 +390,48 @@ const AiChatConfig = () => {
 
   const showSuccess = (msg: string) => {
     toast.onShow({ msg, variant: 'success' });
+  };
+
+  const deleteProvider = async (provider: Type.AdminAiProvider) => {
+    if (!window.confirm(`确认删除 Provider「${provider.name}」？`)) {
+      return;
+    }
+    setError('');
+    try {
+      await deleteAiChatProvider(provider.id);
+      showSuccess('Provider 已删除');
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.msg || 'Provider 删除失败');
+    }
+  };
+
+  const deleteImageProvider = async (provider: Type.AdminAiImageProvider) => {
+    if (!window.confirm(`确认删除生图 Provider「${provider.name}」？`)) {
+      return;
+    }
+    setError('');
+    try {
+      await deleteAdminAiImageProvider(provider.id);
+      showSuccess('生图 Provider 已删除');
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.msg || '生图 Provider 删除失败');
+    }
+  };
+
+  const deleteVideoProvider = async (provider: Type.AdminAiVideoProvider) => {
+    if (!window.confirm(`确认删除视频 Provider「${provider.name}」？`)) {
+      return;
+    }
+    setError('');
+    try {
+      await deleteAdminAiVideoProvider(provider.id);
+      showSuccess('视频 Provider 已删除');
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.msg || '视频 Provider 删除失败');
+    }
   };
 
   const submitProvider = async (evt: FormEvent) => {
@@ -651,6 +709,10 @@ const AiChatConfig = () => {
       showSuccess('模型测试成功');
     } catch (err: any) {
       setTestingResult({
+        provider_id: testingProvider.id,
+        provider_model_id: testingModelID,
+        message: '',
+        raw_response: '',
         error: err?.msg || '模型测试失败',
       });
     } finally {
@@ -839,7 +901,9 @@ const AiChatConfig = () => {
                     <Button
                       size="sm"
                       variant="outline-primary"
-                      onClick={() => setProviderForm(provider)}>
+                      onClick={() =>
+                        setProviderForm({ ...provider, api_key: '' })
+                      }>
                       编辑
                     </Button>
                     <Button
@@ -859,9 +923,7 @@ const AiChatConfig = () => {
                     <Button
                       size="sm"
                       variant="outline-danger"
-                      onClick={() =>
-                        deleteAiChatProvider(provider.id).then(loadAll)
-                      }>
+                      onClick={() => deleteProvider(provider)}>
                       删除
                     </Button>
                   </td>
@@ -1135,7 +1197,15 @@ const AiChatConfig = () => {
                       size="sm"
                       variant="outline-primary"
                       className="me-2"
-                      onClick={() => setMappingForm(mapping)}>
+                      onClick={() =>
+                        setMappingForm({
+                          ...mapping,
+                          items: mapping.items.map((item, index) => ({
+                            ...item,
+                            client_id: `saved-${index}`,
+                          })),
+                        })
+                      }>
                       编辑
                     </Button>
                     <Button
@@ -1798,16 +1868,15 @@ const AiChatConfig = () => {
                     <Button
                       size="sm"
                       variant="outline-primary"
-                      onClick={() => setImageProviderForm(provider)}>
+                      onClick={() =>
+                        setImageProviderForm({ ...provider, api_key: '' })
+                      }>
                       编辑
                     </Button>
                     <Button
                       size="sm"
                       variant="outline-danger"
-                      onClick={async () => {
-                        await deleteAdminAiImageProvider(provider.id);
-                        await loadAll();
-                      }}>
+                      onClick={() => deleteImageProvider(provider)}>
                       删除
                     </Button>
                   </td>
@@ -1956,7 +2025,7 @@ const AiChatConfig = () => {
                         onChange={(e) =>
                           setImageModelForm({
                             ...imageModelForm,
-                            api_mode: e.target.value,
+                            api_mode: e.target.value as ImageAPIMode,
                           })
                         }>
                         <option value="images">Images</option>
@@ -2218,9 +2287,9 @@ const AiChatConfig = () => {
                   <td>{model.provider_name}</td>
                   <td>
                     <div>{model.provider_model_id}</div>
-                    {model.upstreams?.length > 0 && (
+                    {(model.upstreams?.length || 0) > 0 && (
                       <Badge bg="info" className="mt-1">
-                        {model.upstreams.length} 个端点
+                        {model.upstreams?.length} 个端点
                       </Badge>
                     )}
                   </td>
@@ -2400,16 +2469,15 @@ const AiChatConfig = () => {
                     <Button
                       size="sm"
                       variant="outline-primary"
-                      onClick={() => setVideoProviderForm(provider)}>
+                      onClick={() =>
+                        setVideoProviderForm({ ...provider, api_key: '' })
+                      }>
                       编辑
                     </Button>
                     <Button
                       size="sm"
                       variant="outline-danger"
-                      onClick={async () => {
-                        await deleteAdminAiVideoProvider(provider.id);
-                        await loadAll();
-                      }}>
+                      onClick={() => deleteVideoProvider(provider)}>
                       删除
                     </Button>
                   </td>

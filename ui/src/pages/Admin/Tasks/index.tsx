@@ -7,6 +7,7 @@ import {
   reviewTask,
   reviewTaskSubmission,
   TaskItem,
+  TaskStatus,
   useAdminTasks,
 } from '@/services';
 import { toastStore } from '@/stores';
@@ -14,7 +15,9 @@ import { toastStore } from '@/stores';
 import './index.scss';
 
 const PAGE_SIZE = 20;
-const statusText = {
+type AdminTaskReviewStatus = 'open' | 'rejected' | 'closed' | 'failed';
+
+const statusText: Record<TaskStatus, string> = {
   pending_review: '待审核',
   open: '已发布',
   in_progress: '进行中',
@@ -29,6 +32,34 @@ const filters = Object.entries(statusText).map(([sort, name]) => ({
   name,
 }));
 
+const taskStatuses = new Set<TaskStatus>(
+  Object.keys(statusText) as TaskStatus[],
+);
+
+const reviewStatuses = new Set<AdminTaskReviewStatus>([
+  'open',
+  'rejected',
+  'closed',
+  'failed',
+]);
+
+const parseTaskStatus = (value: string | null): TaskStatus => {
+  if (value && taskStatuses.has(value as TaskStatus)) {
+    return value as TaskStatus;
+  }
+  return 'pending_review';
+};
+
+const parseReviewStatus = (value: unknown): AdminTaskReviewStatus => {
+  if (
+    typeof value === 'string' &&
+    reviewStatuses.has(value as AdminTaskReviewStatus)
+  ) {
+    return value as AdminTaskReviewStatus;
+  }
+  return 'open';
+};
+
 const getErrorMessage = (err: any, fallback: string) => {
   return err?.msg || err?.message || fallback;
 };
@@ -36,7 +67,7 @@ const getErrorMessage = (err: any, fallback: string) => {
 const AdminTasks: FC = () => {
   const [params] = useSearchParams();
   const page = Number(params.get('page')) || 1;
-  const status = params.get('status') || 'pending_review';
+  const status = parseTaskStatus(params.get('status'));
   const { data, mutate } = useAdminTasks({
     page,
     page_size: PAGE_SIZE,
@@ -87,7 +118,7 @@ const AdminTasks: FC = () => {
           .split('\n')
           .map((item) => item.trim())
           .filter(Boolean),
-        status: form.status,
+        status: parseReviewStatus(form.status),
         review_comment: form.review_comment,
       });
       toastStore.getState().show({ msg: '保存成功', variant: 'success' });
@@ -279,7 +310,9 @@ const AdminTasks: FC = () => {
             <Form.Label>状态</Form.Label>
             <Form.Select
               value={form.status || 'open'}
-              onChange={(e) => setForm({ ...form, status: e.target.value })}>
+              onChange={(e) =>
+                setForm({ ...form, status: parseReviewStatus(e.target.value) })
+              }>
               <option value="open">发布</option>
               <option value="rejected">驳回</option>
               <option value="closed">关闭</option>

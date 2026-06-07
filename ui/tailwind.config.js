@@ -3,6 +3,9 @@ const colors = require('tailwindcss/colors');
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: 'media',
+  corePlugins: {
+    preflight: false,
+  },
   content: [
     './src/pages/Chat/ImageGeneration/**/*.{js,ts,jsx,tsx}',
     './node_modules/streamdown/dist/*.js',

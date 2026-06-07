@@ -19,7 +19,7 @@ export const DEFAULT_ZIP_DOWNLOAD_ROUTES: ZipDownloadRoute[] = [
 export type BuiltInApiProvider = 'openai' | 'fal';
 export type ApiProvider = BuiltInApiProvider | string;
 export type CustomProviderTemplate = 'http-image';
-export const DEFAULT_STREAM_PARTIAL_IMAGES = 1;
+export const DEFAULT_STREAM_PARTIAL_IMAGES = 3;
 export const DEFAULT_AGENT_MAX_TOOL_ROUNDS = 15;
 
 export type CustomProviderRequestMethod = 'GET' | 'POST';
@@ -184,6 +184,8 @@ export interface TaskRecord {
   apiMode?: ApiMode;
   /** 生成时使用的模型 ID */
   apiModel?: string;
+  /** 生成时请求的流式中间步骤图数量 */
+  streamPartialImages?: number;
   /** fal.ai 队列请求 ID，用于连接断开后的结果恢复 */
   falRequestId?: string;
   /** fal.ai 队列 endpoint，用于连接断开后的状态和结果查询 */

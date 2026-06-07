@@ -5,7 +5,7 @@ import {
   getComfortableInitialTransform,
   getPinchTransform,
   zoomAtPoint,
-} from '../../../../../src/pages/Chat/ImageGeneration/lib/viewportTransform'
+} from '@/pages/Chat/ImageGeneration/lib/viewportTransform'
 
 describe('viewport transform helpers', () => {
   it('keeps an unzoomed canvas centered by clamping offsets to zero', () => {

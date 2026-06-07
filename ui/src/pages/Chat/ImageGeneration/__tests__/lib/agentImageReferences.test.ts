@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentRound, TaskRecord } from '../../../../../src/pages/Chat/ImageGeneration/types'
-import { DEFAULT_PARAMS } from '../../../../../src/pages/Chat/ImageGeneration/types'
-import { getSelectedImageMentionLabel, getSelectedTextMentionLabel } from '../../../../../src/pages/Chat/ImageGeneration/lib/promptImageMentions'
-import { extractAgentReferenceIds, replaceAgentPromptImageReferencesForApi, resolveAgentPromptImageReferences } from '../../../../../src/pages/Chat/ImageGeneration/lib/agentImageReferences'
+import type { AgentRound, TaskRecord } from '@/pages/Chat/ImageGeneration/types'
+import { DEFAULT_PARAMS } from '@/pages/Chat/ImageGeneration/types'
+import { getSelectedImageMentionLabel, getSelectedTextMentionLabel } from '@/pages/Chat/ImageGeneration/lib/promptImageMentions'
+import { extractAgentReferenceIds, replaceAgentPromptImageReferencesForApi, resolveAgentPromptImageReferences } from '@/pages/Chat/ImageGeneration/lib/agentImageReferences'
 
 const round = (patch: Partial<AgentRound>): AgentRound => ({
   id: patch.id ?? `round-${patch.index ?? 1}`,

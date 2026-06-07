@@ -97,7 +97,7 @@ func (s *TaskSquareService) CreateTask(ctx context.Context, req *schema.TaskCrea
 		Cols("user_id", "title", "description", "attachments", "status").
 		Insert(task)
 	if err == nil {
-		s.realtime.Broadcast(realtime.EventTasksChanged, map[string]any{"user_id": req.UserID})
+		s.publishTaskChanged(task, req.UserID)
 	}
 	return err
 }
@@ -127,7 +127,11 @@ func (s *TaskSquareService) ListTasks(ctx context.Context, req *schema.TaskListR
 	}
 	resp := make([]*schema.TaskResp, 0, len(tasks))
 	for _, task := range tasks {
-		resp = append(resp, s.taskResp(ctx, task))
+		taskResp, err := s.taskResp(ctx, task)
+		if err != nil {
+			return nil, err
+		}
+		resp = append(resp, taskResp)
 	}
 	return pager.NewPageModel(total, resp), nil
 }
@@ -144,7 +148,7 @@ func (s *TaskSquareService) GetTask(ctx context.Context, id int, userID string, 
 	if !isAdmin && !isPublicTaskStatus(task.Status) && task.UserID != userID && task.AssigneeID != userID {
 		return nil, errors.Forbidden(reason.ForbiddenError)
 	}
-	return s.taskResp(ctx, task), nil
+	return s.taskResp(ctx, task)
 }
 
 func (s *TaskSquareService) ReviewTask(ctx context.Context, req *schema.TaskReviewReq) error {
@@ -176,7 +180,9 @@ func (s *TaskSquareService) ReviewTask(ctx context.Context, req *schema.TaskRevi
 		ReviewerID:             req.OperatorID,
 	})
 	if err == nil {
-		s.realtime.Broadcast(realtime.EventTasksChanged, map[string]any{"task_id": req.ID})
+		task.Status = req.Status
+		task.AssigneeID = ""
+		s.publishTaskChanged(task, task.UserID)
 	}
 	return err
 }
@@ -190,18 +196,24 @@ func (s *TaskSquareService) ClaimTask(ctx context.Context, req *schema.TaskClaim
 	if !has {
 		return errors.NotFound(reason.ObjectNotFound)
 	}
-	if task.Status != entity.TaskStatusOpen || task.AssigneeID != "0" && task.AssigneeID != "" {
+	affected, err := s.data.DB.Context(ctx).
+		Where("id = ? AND status = ? AND (assignee_id = '' OR assignee_id = '0')", req.ID, entity.TaskStatusOpen).
+		Cols("assignee_id", "claimed_at", "status").
+		Update(&entity.Task{
+			AssigneeID: req.UserID,
+			ClaimedAt:  time.Now(),
+			Status:     entity.TaskStatusInProgress,
+		})
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
 		return errors.BadRequest(reason.RequestFormatError)
 	}
-	_, err = s.data.DB.Context(ctx).ID(req.ID).Cols("assignee_id", "claimed_at", "status").Update(&entity.Task{
-		AssigneeID: req.UserID,
-		ClaimedAt:  time.Now(),
-		Status:     entity.TaskStatusInProgress,
-	})
-	if err == nil {
-		s.realtime.Broadcast(realtime.EventTasksChanged, map[string]any{"task_id": req.ID, "user_id": req.UserID})
-	}
-	return err
+	task.AssigneeID = req.UserID
+	task.Status = entity.TaskStatusInProgress
+	s.publishTaskChanged(task, req.UserID)
+	return nil
 }
 
 func (s *TaskSquareService) AssignTask(ctx context.Context, req *schema.TaskAssignReq) error {
@@ -213,18 +225,24 @@ func (s *TaskSquareService) AssignTask(ctx context.Context, req *schema.TaskAssi
 	if !has {
 		return errors.NotFound(reason.ObjectNotFound)
 	}
-	if task.Status != entity.TaskStatusOpen && task.Status != entity.TaskStatusInProgress {
+	affected, err := s.data.DB.Context(ctx).
+		Where("id = ? AND status IN (?, ?)", req.ID, entity.TaskStatusOpen, entity.TaskStatusInProgress).
+		Cols("assignee_id", "claimed_at", "status").
+		Update(&entity.Task{
+			AssigneeID: req.AssigneeID,
+			ClaimedAt:  time.Now(),
+			Status:     entity.TaskStatusInProgress,
+		})
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
 		return errors.BadRequest(reason.RequestFormatError)
 	}
-	_, err = s.data.DB.Context(ctx).ID(req.ID).Cols("assignee_id", "claimed_at", "status").Update(&entity.Task{
-		AssigneeID: req.AssigneeID,
-		ClaimedAt:  time.Now(),
-		Status:     entity.TaskStatusInProgress,
-	})
-	if err == nil {
-		s.realtime.Broadcast(realtime.EventTasksChanged, map[string]any{"task_id": req.ID, "user_id": req.AssigneeID})
-	}
-	return err
+	task.AssigneeID = req.AssigneeID
+	task.Status = entity.TaskStatusInProgress
+	s.publishTaskChanged(task, req.AssigneeID)
+	return nil
 }
 
 func (s *TaskSquareService) SubmitTask(ctx context.Context, req *schema.TaskSubmitReq) error {
@@ -240,12 +258,27 @@ func (s *TaskSquareService) SubmitTask(ctx context.Context, req *schema.TaskSubm
 		return errors.Forbidden(reason.ForbiddenError)
 	}
 	if !task.Deadline.IsZero() && time.Now().After(task.Deadline) {
-		_, _ = s.data.DB.Context(ctx).ID(task.ID).Cols("status").Update(&entity.Task{Status: entity.TaskStatusFailed})
+		_, _ = s.data.DB.Context(ctx).
+			Where("id = ? AND status = ?", task.ID, entity.TaskStatusInProgress).
+			Cols("status").
+			Update(&entity.Task{Status: entity.TaskStatusFailed})
 		return errors.BadRequest(reason.RequestFormatError)
 	}
 	session := s.data.DB.Context(ctx)
 	if err := session.Begin(); err != nil {
 		return err
+	}
+	affected, err := session.
+		Where("id = ? AND assignee_id = ? AND status = ?", req.ID, req.UserID, entity.TaskStatusInProgress).
+		Cols("status").
+		Update(&entity.Task{Status: entity.TaskStatusSubmitted})
+	if err != nil {
+		_ = session.Rollback()
+		return err
+	}
+	if affected == 0 {
+		_ = session.Rollback()
+		return errors.BadRequest(reason.RequestFormatError)
 	}
 	submission := &entity.TaskSubmission{
 		TaskID:      req.ID,
@@ -259,14 +292,10 @@ func (s *TaskSquareService) SubmitTask(ctx context.Context, req *schema.TaskSubm
 		_ = session.Rollback()
 		return err
 	}
-	if _, err = session.ID(req.ID).Cols("status").Update(&entity.Task{Status: entity.TaskStatusSubmitted}); err != nil {
-		_ = session.Rollback()
-		return err
-	}
 	if err = session.Commit(); err != nil {
 		return err
 	}
-	s.realtime.Broadcast(realtime.EventTasksChanged, map[string]any{"task_id": req.ID, "user_id": req.UserID})
+	s.publishTaskChanged(&entity.Task{ID: req.ID, UserID: task.UserID, AssigneeID: task.AssigneeID, Status: entity.TaskStatusSubmitted}, req.UserID)
 	return nil
 }
 
@@ -324,21 +353,37 @@ func (s *TaskSquareService) ReviewSubmission(ctx context.Context, req *schema.Ta
 	}
 	if req.Approved {
 		if sub != nil {
-			if _, err = session.ID(sub.ID).Cols("status", "review_note", "reviewer_id").Update(&entity.TaskSubmission{
-				Status:     entity.TaskSubmissionStatusApproved,
-				ReviewNote: req.ReviewNote,
-				ReviewerID: req.OperatorID,
-			}); err != nil {
+			affected, err := session.
+				Where("id = ? AND status = ?", sub.ID, entity.TaskSubmissionStatusPending).
+				Cols("status", "review_note", "reviewer_id").
+				Update(&entity.TaskSubmission{
+					Status:     entity.TaskSubmissionStatusApproved,
+					ReviewNote: req.ReviewNote,
+					ReviewerID: req.OperatorID,
+				})
+			if err != nil {
 				_ = session.Rollback()
 				return err
 			}
+			if affected == 0 {
+				_ = session.Rollback()
+				return errors.BadRequest(reason.RequestFormatError)
+			}
 		}
-		if _, err = session.ID(task.ID).Cols("status", "completed_at").Update(&entity.Task{
-			Status:      entity.TaskStatusCompleted,
-			CompletedAt: time.Now(),
-		}); err != nil {
+		affected, err := session.
+			Where("id = ? AND status = ?", task.ID, entity.TaskStatusSubmitted).
+			Cols("status", "completed_at").
+			Update(&entity.Task{
+				Status:      entity.TaskStatusCompleted,
+				CompletedAt: time.Now(),
+			})
+		if err != nil {
 			_ = session.Rollback()
 			return err
+		}
+		if affected == 0 {
+			_ = session.Rollback()
+			return errors.BadRequest(reason.RequestFormatError)
 		}
 		if err = s.addPointsWithSession(ctx, session, task.AssigneeID, entity.PointSourceTaskReward, fmt.Sprintf("%d", task.ID), task.RewardPoints, "任务完成奖励："+task.Title, req.OperatorID); err != nil {
 			_ = session.Rollback()
@@ -346,27 +391,48 @@ func (s *TaskSquareService) ReviewSubmission(ctx context.Context, req *schema.Ta
 		}
 	} else {
 		if sub != nil {
-			if _, err = session.ID(sub.ID).Cols("status", "review_note", "reviewer_id").Update(&entity.TaskSubmission{
-				Status:     entity.TaskSubmissionStatusRejected,
-				ReviewNote: req.ReviewNote,
-				ReviewerID: req.OperatorID,
-			}); err != nil {
+			affected, err := session.
+				Where("id = ? AND status = ?", sub.ID, entity.TaskSubmissionStatusPending).
+				Cols("status", "review_note", "reviewer_id").
+				Update(&entity.TaskSubmission{
+					Status:     entity.TaskSubmissionStatusRejected,
+					ReviewNote: req.ReviewNote,
+					ReviewerID: req.OperatorID,
+				})
+			if err != nil {
 				_ = session.Rollback()
 				return err
 			}
+			if affected == 0 {
+				_ = session.Rollback()
+				return errors.BadRequest(reason.RequestFormatError)
+			}
 		}
-		if _, err = session.ID(task.ID).Cols("status").Update(&entity.Task{Status: entity.TaskStatusInProgress}); err != nil {
+		affected, err := session.
+			Where("id = ? AND status = ?", task.ID, entity.TaskStatusSubmitted).
+			Cols("status").
+			Update(&entity.Task{Status: entity.TaskStatusInProgress})
+		if err != nil {
 			_ = session.Rollback()
 			return err
+		}
+		if affected == 0 {
+			_ = session.Rollback()
+			return errors.BadRequest(reason.RequestFormatError)
 		}
 	}
 	if err = session.Commit(); err != nil {
 		return err
 	}
-	s.realtime.Broadcast(realtime.EventTasksChanged, map[string]any{"task_id": task.ID, "user_id": task.AssigneeID})
 	if req.Approved {
-		s.realtime.SendToUser(task.AssigneeID, realtime.EventPointsChanged, map[string]any{"source": entity.PointSourceTaskReward})
-		s.realtime.Broadcast(realtime.EventAdminUsersChanged, map[string]any{"user_id": task.AssigneeID})
+		task.Status = entity.TaskStatusCompleted
+	} else {
+		task.Status = entity.TaskStatusInProgress
+	}
+	s.publishTaskChanged(task, task.AssigneeID)
+	if req.Approved {
+		s.sendToUser(task.AssigneeID, realtime.EventPointsChanged, map[string]any{"source": entity.PointSourceTaskReward})
+		s.broadcastToAdmins(realtime.EventAdminUsersChanged, map[string]any{"user_id": task.AssigneeID})
 	}
 	return nil
 }
@@ -407,16 +473,23 @@ func (s *TaskSquareService) FeaturePost(ctx context.Context, req *schema.Feature
 	if !has {
 		return errors.NotFound(reason.QuestionNotFound)
 	}
-	exist, err := s.data.DB.Context(ctx).Where("question_id = ?", req.QuestionID).Exist(new(entity.FeaturedPost))
+	if !canFeatureQuestion(question) {
+		return errors.BadRequest(reason.RequestFormatError)
+	}
+	session := s.data.DB.NewSession()
+	defer session.Close()
+	session.Context(ctx)
+	if err = session.Begin(); err != nil {
+		return err
+	}
+	exist, err := session.Where("question_id = ? AND active = ? AND revoked = ?", req.QuestionID, true, false).Exist(new(entity.FeaturedPost))
 	if err != nil {
+		_ = session.Rollback()
 		return err
 	}
 	if exist {
+		_ = session.Rollback()
 		return errors.BadRequest(reason.DuplicateRequestError)
-	}
-	session := s.data.DB.Context(ctx)
-	if err = session.Begin(); err != nil {
-		return err
 	}
 	featured := &entity.FeaturedPost{
 		QuestionID:   req.QuestionID,
@@ -432,6 +505,7 @@ func (s *TaskSquareService) FeaturePost(ctx context.Context, req *schema.Feature
 		_ = session.Rollback()
 		return err
 	}
+	rewardSourceID := fmt.Sprintf("%d", featured.ID)
 	tag, err := s.ensureFeaturedPostTagWithSession(ctx, session, req.OperatorID)
 	if err != nil {
 		_ = session.Rollback()
@@ -441,21 +515,27 @@ func (s *TaskSquareService) FeaturePost(ctx context.Context, req *schema.Feature
 		_ = session.Rollback()
 		return err
 	}
-	if err = s.addPointsWithSession(ctx, session, question.UserID, entity.PointSourceFeaturedPostReward, req.QuestionID, req.RewardPoints, "帖子精选奖励："+question.Title, req.OperatorID); err != nil {
+	if err = s.addPointsWithSession(ctx, session, question.UserID, entity.PointSourceFeaturedPostReward, rewardSourceID, req.RewardPoints, "帖子精选奖励："+question.Title, req.OperatorID); err != nil {
 		_ = session.Rollback()
 		return err
 	}
 	if err = session.Commit(); err != nil {
 		return err
 	}
-	s.realtime.Broadcast(realtime.EventQuestionFeatured, map[string]any{"question_id": req.QuestionID})
-	s.realtime.Broadcast(realtime.EventFeaturedPostsChanged, map[string]any{"question_id": req.QuestionID})
-	s.realtime.SendToUser(question.UserID, realtime.EventPointsChanged, map[string]any{
+	s.broadcast(realtime.EventQuestionFeatured, map[string]any{"question_id": req.QuestionID})
+	s.broadcastToAdmins(realtime.EventFeaturedPostsChanged, map[string]any{"question_id": req.QuestionID})
+	s.sendToUser(question.UserID, realtime.EventPointsChanged, map[string]any{
 		"question_id": req.QuestionID,
 		"source":      entity.PointSourceFeaturedPostReward,
 	})
-	s.realtime.Broadcast(realtime.EventAdminUsersChanged, map[string]any{"user_id": question.UserID})
+	s.broadcastToAdmins(realtime.EventAdminUsersChanged, map[string]any{"user_id": question.UserID})
 	return nil
+}
+
+func canFeatureQuestion(question *entity.Question) bool {
+	return question != nil &&
+		question.Show == entity.QuestionShow &&
+		(question.Status == entity.QuestionStatusAvailable || question.Status == entity.QuestionStatusClosed)
 }
 
 func (s *TaskSquareService) ListFeaturedPosts(ctx context.Context, req *schema.FeaturedPostListReq) (*pager.PageModel, error) {
@@ -478,41 +558,71 @@ func (s *TaskSquareService) ListFeaturedPosts(ctx context.Context, req *schema.F
 }
 
 func (s *TaskSquareService) RevokeFeaturedPostReward(ctx context.Context, questionID, operatorID string) error {
+	return s.revokeFeaturedPostReward(ctx, questionID, operatorID, false)
+}
+
+func (s *TaskSquareService) RevokeFeaturedPostRewardIfExists(ctx context.Context, questionID, operatorID string) error {
+	return s.revokeFeaturedPostReward(ctx, questionID, operatorID, true)
+}
+
+func (s *TaskSquareService) revokeFeaturedPostReward(ctx context.Context, questionID, operatorID string, ignoreMissing bool) error {
 	questionID = uid.DeShortID(questionID)
 	featured := &entity.FeaturedPost{}
-	has, err := s.data.DB.Context(ctx).Where("question_id = ? AND revoked = ?", questionID, false).Get(featured)
-	if err != nil || !has {
+	has, err := s.data.DB.Context(ctx).Where("question_id = ? AND active = ? AND revoked = ?", questionID, true, false).Get(featured)
+	if err != nil {
 		return err
 	}
-	session := s.data.DB.Context(ctx)
+	if !has {
+		if ignoreMissing {
+			return nil
+		}
+		return errors.NotFound(reason.ObjectNotFound)
+	}
+	session := s.data.DB.NewSession()
+	defer session.Close()
+	session.Context(ctx)
 	if err = session.Begin(); err != nil {
 		return err
 	}
 	now := time.Now()
-	if _, err = session.ID(featured.ID).Cols("active", "revoked", "revoked_at").Update(&entity.FeaturedPost{
-		Active: false, Revoked: true, RevokedAt: now,
-	}); err != nil {
+	affected, err := session.Table(new(entity.FeaturedPost)).
+		Where("id = ? AND revoked = ?", featured.ID, false).
+		Update(map[string]any{
+			"active":     false,
+			"revoked":    true,
+			"revoked_at": now,
+		})
+	if err != nil {
 		_ = session.Rollback()
 		return err
 	}
-	if err = s.addPointsWithSession(ctx, session, featured.AuthorID, entity.PointSourceFeaturedPostRevoke, featured.QuestionID, -featured.RewardPoints, "精选帖子删除，积分收回："+featured.Title, operatorID); err != nil {
+	if affected == 0 {
+		_ = session.Rollback()
+		return errors.BadRequest(reason.RequestFormatError)
+	}
+	if err = s.hideFeaturedPostTagRelWithSession(session, featured.QuestionID); err != nil {
+		_ = session.Rollback()
+		return err
+	}
+	revokeSourceID := fmt.Sprintf("%d", featured.ID)
+	if err = s.addPointsWithSession(ctx, session, featured.AuthorID, entity.PointSourceFeaturedPostRevoke, revokeSourceID, -featured.RewardPoints, "精选帖子删除，积分收回："+featured.Title, operatorID); err != nil {
 		_ = session.Rollback()
 		return err
 	}
 	if err = session.Commit(); err != nil {
 		return err
 	}
-	s.realtime.Broadcast(realtime.EventQuestionFeatured, map[string]any{"question_id": featured.QuestionID, "revoked": true})
-	s.realtime.Broadcast(realtime.EventFeaturedPostsChanged, map[string]any{"question_id": featured.QuestionID})
-	s.realtime.SendToUser(featured.AuthorID, realtime.EventPointsChanged, map[string]any{
+	s.broadcast(realtime.EventQuestionFeatured, map[string]any{"question_id": featured.QuestionID, "revoked": true})
+	s.broadcastToAdmins(realtime.EventFeaturedPostsChanged, map[string]any{"question_id": featured.QuestionID})
+	s.sendToUser(featured.AuthorID, realtime.EventPointsChanged, map[string]any{
 		"question_id": featured.QuestionID,
 		"source":      entity.PointSourceFeaturedPostRevoke,
 	})
-	s.realtime.Broadcast(realtime.EventAdminUsersChanged, map[string]any{"user_id": featured.AuthorID})
+	s.broadcastToAdmins(realtime.EventAdminUsersChanged, map[string]any{"user_id": featured.AuthorID})
 	return nil
 }
 
-func (s *TaskSquareService) taskResp(ctx context.Context, task *entity.Task) *schema.TaskResp {
+func (s *TaskSquareService) taskResp(ctx context.Context, task *entity.Task) (*schema.TaskResp, error) {
 	resp := &schema.TaskResp{
 		ID: task.ID, CreatedAt: unixTime(task.CreatedAt), UpdatedAt: unixTime(task.UpdatedAt), UserID: task.UserID,
 		UserDisplayName: s.userName(ctx, task.UserID), ReviewerID: task.ReviewerID, AssigneeID: task.AssigneeID,
@@ -522,7 +632,10 @@ func (s *TaskSquareService) taskResp(ctx context.Context, task *entity.Task) *sc
 		ReviewComment: task.ReviewComment, ClaimedAt: unixTime(task.ClaimedAt), CompletedAt: unixTime(task.CompletedAt),
 	}
 	sub := &entity.TaskSubmission{}
-	has, _ := s.data.DB.Context(ctx).Where("task_id = ?", task.ID).Desc("id").Get(sub)
+	has, err := s.data.DB.Context(ctx).Where("task_id = ?", task.ID).Desc("id").Get(sub)
+	if err != nil {
+		return nil, err
+	}
 	if has {
 		resp.Submission = &schema.TaskSubmissionResp{
 			ID: sub.ID, CreatedAt: unixTime(sub.CreatedAt), UpdatedAt: unixTime(sub.UpdatedAt), TaskID: sub.TaskID,
@@ -530,7 +643,57 @@ func (s *TaskSquareService) taskResp(ctx context.Context, task *entity.Task) *sc
 			Attachments: decodeList(sub.Attachments), Status: sub.Status, ReviewNote: sub.ReviewNote,
 		}
 	}
-	return resp
+	return resp, nil
+}
+
+func (s *TaskSquareService) broadcast(eventType string, data map[string]any) {
+	if s.realtime == nil {
+		return
+	}
+	s.realtime.Broadcast(eventType, data)
+}
+
+func (s *TaskSquareService) broadcastToAdmins(eventType string, data map[string]any) {
+	if s.realtime == nil {
+		return
+	}
+	s.realtime.BroadcastToAdmins(eventType, data)
+}
+
+func (s *TaskSquareService) sendToUser(userID, eventType string, data map[string]any) {
+	if s.realtime == nil {
+		return
+	}
+	s.realtime.SendToUser(userID, eventType, data)
+}
+
+func (s *TaskSquareService) publishTaskChanged(task *entity.Task, actorUserID string) {
+	if task == nil || s.realtime == nil {
+		return
+	}
+	data := map[string]any{"task_id": task.ID}
+	if actorUserID != "" && actorUserID != "0" {
+		data["user_id"] = actorUserID
+	}
+	if task.UserID != "" && task.UserID != "0" {
+		data["owner_id"] = task.UserID
+	}
+	if task.AssigneeID != "" && task.AssigneeID != "0" {
+		data["assignee_id"] = task.AssigneeID
+	}
+	if task.Status != "" {
+		data["status"] = task.Status
+	}
+
+	if isPublicTaskStatus(task.Status) {
+		s.broadcast(realtime.EventTasksChanged, data)
+		return
+	}
+	s.sendToUser(task.UserID, realtime.EventTasksChanged, data)
+	if task.AssigneeID != "" && task.AssigneeID != "0" && task.AssigneeID != task.UserID {
+		s.sendToUser(task.AssigneeID, realtime.EventTasksChanged, data)
+	}
+	s.broadcastToAdmins(realtime.EventTasksChanged, data)
 }
 
 func (s *TaskSquareService) userName(ctx context.Context, userID string) string {
@@ -633,7 +796,7 @@ func (s *TaskSquareService) ensureFeaturedPostTagRelWithSession(ctx context.Cont
 		return err
 	}
 	if has {
-		if rel.Status != entity.TagRelStatusAvailable && rel.Status != entity.TagRelStatusHide {
+		if rel.Status != status {
 			if _, err = session.ID(rel.ID).Cols("status").Update(&entity.TagRel{Status: status}); err != nil {
 				return err
 			}
@@ -648,6 +811,25 @@ func (s *TaskSquareService) ensureFeaturedPostTagRelWithSession(ctx context.Cont
 		return err
 	}
 	return s.refreshFeaturedPostTagCountWithSession(session, tagID)
+}
+
+func (s *TaskSquareService) hideFeaturedPostTagRelWithSession(session *xorm.Session, questionID string) error {
+	tag := &entity.Tag{}
+	has, err := session.Where("LOWER(slug_name) = ?", featuredPostTagSlugName).Get(tag)
+	if err != nil {
+		return err
+	}
+	if !has {
+		return nil
+	}
+	_, err = session.
+		Where("object_id = ? AND tag_id = ? AND status = ?", questionID, tag.ID, entity.TagRelStatusAvailable).
+		Cols("status").
+		Update(&entity.TagRel{Status: entity.TagRelStatusHide})
+	if err != nil {
+		return err
+	}
+	return s.refreshFeaturedPostTagCountWithSession(session, tag.ID)
 }
 
 func (s *TaskSquareService) refreshFeaturedPostTagCountWithSession(session *xorm.Session, tagID string) error {
@@ -667,27 +849,64 @@ func (s *TaskSquareService) addPointsWithSession(ctx context.Context, session *x
 	if err != nil {
 		return err
 	}
-	if exist && sourceType != entity.PointSourceFeaturedPostRevoke {
+	if exist {
 		return nil
 	}
 	account := &entity.UserPointAccount{UserID: userID}
-	has, err := session.Get(account)
+	has, err := session.ForUpdate().Get(account)
 	if err != nil {
 		return err
 	}
 	if !has {
 		account.Balance = 0
-		if _, err = session.Insert(account); err != nil {
+		if _, err = session.Insert(account); err != nil && !isDuplicateKeyError(err) {
 			return err
 		}
+		if isDuplicateKeyError(err) {
+			account = &entity.UserPointAccount{UserID: userID}
+			if has, err = session.ForUpdate().Get(account); err != nil {
+				return err
+			}
+			if !has {
+				return fmt.Errorf("point account is not available")
+			}
+		}
 	}
-	nextBalance := account.Balance + delta
-	if _, err = session.ID(userID).Cols("balance").Update(&entity.UserPointAccount{Balance: nextBalance}); err != nil {
+	exist, err = session.Where("user_id = ? AND source_type = ? AND source_id = ?", userID, sourceType, sourceID).Exist(new(entity.PointTransaction))
+	if err != nil {
 		return err
+	}
+	if exist {
+		return nil
+	}
+	if _, err = session.ID(userID).Incr("balance", delta).Update(&entity.UserPointAccount{}); err != nil {
+		return err
+	}
+	updated := &entity.UserPointAccount{UserID: userID}
+	if has, err = session.Get(updated); err != nil {
+		return err
+	}
+	if !has {
+		return fmt.Errorf("point account is not available")
 	}
 	_, err = session.Insert(&entity.PointTransaction{
 		UserID: userID, SourceType: sourceType, SourceID: sourceID, Delta: delta,
-		Balance: nextBalance, Description: description, OperatorID: operatorID,
+		Balance: updated.Balance, Description: description, OperatorID: operatorID,
 	})
+	if isDuplicateKeyError(err) {
+		return err
+	}
 	return err
+}
+
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "duplicate") ||
+		strings.Contains(text, "unique constraint") ||
+		strings.Contains(text, "unique failed") ||
+		strings.Contains(text, "constraint failed") ||
+		strings.Contains(text, "duplicate key")
 }

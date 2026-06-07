@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_PARAMS } from '../../../../../src/pages/Chat/ImageGeneration/types'
-import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from '../../../../../src/pages/Chat/ImageGeneration/lib/apiProfiles'
-import { callAgentConversationTitleApi, callAgentResponsesApi } from '../../../../../src/pages/Chat/ImageGeneration/lib/agentApi'
+import { DEFAULT_PARAMS } from '@/pages/Chat/ImageGeneration/types'
+import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from '@/pages/Chat/ImageGeneration/lib/apiProfiles'
+import { callAgentConversationTitleApi, callAgentResponsesApi } from '@/pages/Chat/ImageGeneration/lib/agentApi'
 
 describe('callAgentResponsesApi', () => {
   afterEach(() => {
@@ -33,8 +33,9 @@ describe('callAgentResponsesApi', () => {
 
     const result = await callAgentResponsesApi({
       settings: DEFAULT_SETTINGS,
-      profile,
+      model: profile.model,
       params: DEFAULT_PARAMS,
+      streamPartialImages: profile.streamPartialImages,
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'prompt' }] }],
       onTextDelta: (delta) => textDeltas.push(delta),
     })
@@ -68,7 +69,7 @@ describe('callAgentResponsesApi', () => {
 
     await callAgentResponsesApi({
       settings: DEFAULT_SETTINGS,
-      profile,
+      model: profile.model,
       params: DEFAULT_PARAMS,
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'edit' }] }],
       maskDataUrl: 'data:image/png;base64,bWFzaw==',
@@ -97,7 +98,7 @@ describe('callAgentResponsesApi', () => {
 
     const result = await callAgentResponsesApi({
       settings: DEFAULT_SETTINGS,
-      profile,
+      model: profile.model,
       params: DEFAULT_PARAMS,
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'prompt' }] }],
     })
@@ -134,7 +135,7 @@ describe('callAgentResponsesApi', () => {
 
     await expect(callAgentResponsesApi({
       settings: DEFAULT_SETTINGS,
-      profile,
+      model: profile.model,
       params: DEFAULT_PARAMS,
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'prompt' }] }],
       signal: abortController.signal,
@@ -165,7 +166,7 @@ describe('callAgentResponsesApi', () => {
 
     const title = await callAgentConversationTitleApi({
       settings: DEFAULT_SETTINGS,
-      profile,
+      model: profile.model,
       prompt: '帮我生成一张橘猫头像，要赛博朋克风格',
     })
 
@@ -173,7 +174,7 @@ describe('callAgentResponsesApi', () => {
     const body = JSON.parse(String((init as RequestInit).body))
     expect(body.instructions).toContain('<title>short title</title>')
     expect(body.tools).toBeUndefined()
-    expect(body.stream).toBeUndefined()
+    expect(body.stream).toBe(false)
     expect(body.input[0].content[0].text).toContain('帮我生成一张橘猫头像，要赛博朋克风格')
     expect(title).toBe('生成猫咪头像')
   })
@@ -214,7 +215,7 @@ describe('callAgentResponsesApi', () => {
 
     const result = await callAgentResponsesApi({
       settings: { ...DEFAULT_SETTINGS, agentWebSearch: true },
-      profile,
+      model: profile.model,
       params: DEFAULT_PARAMS,
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'prompt' }] }],
     })

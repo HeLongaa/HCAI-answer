@@ -1,8 +1,8 @@
 import { fal } from '@fal-ai/client'
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
-import { DEFAULT_PARAMS } from '../../../../../src/pages/Chat/ImageGeneration/types'
-import { createDefaultFalProfile, DEFAULT_FAL_BASE_URL, DEFAULT_SETTINGS } from '../../../../../src/pages/Chat/ImageGeneration/lib/apiProfiles'
-import { callFalAiImageApi } from '../../../../../src/pages/Chat/ImageGeneration/lib/falAiImageApi'
+import { DEFAULT_PARAMS } from '@/pages/Chat/ImageGeneration/types'
+import { createDefaultFalProfile, DEFAULT_FAL_BASE_URL, DEFAULT_SETTINGS } from '@/pages/Chat/ImageGeneration/lib/apiProfiles'
+import { callFalAiImageApi } from '@/pages/Chat/ImageGeneration/lib/falAiImageApi'
 
 vi.mock('@fal-ai/client', () => ({
   fal: {

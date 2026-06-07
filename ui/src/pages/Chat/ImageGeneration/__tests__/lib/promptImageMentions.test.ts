@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { InputImage } from '../../../../../src/pages/Chat/ImageGeneration/types'
-import { getAtImageQuery, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, insertImageMention, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, remapImageMentionsForOrder, replaceImageMentionsForApi } from '../../../../../src/pages/Chat/ImageGeneration/lib/promptImageMentions'
+import type { InputImage } from '@/pages/Chat/ImageGeneration/types'
+import { getAtImageQuery, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, insertImageMention, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, remapImageMentionsForOrder, replaceImageMentionsForApi } from '@/pages/Chat/ImageGeneration/lib/promptImageMentions'
 
 const images: InputImage[] = [
   { id: 'image-a', dataUrl: 'data:image/png;base64,a' },

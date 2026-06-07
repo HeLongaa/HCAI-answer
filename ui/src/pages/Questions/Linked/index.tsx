@@ -73,11 +73,6 @@ const LinkedQuestions: FC = () => {
     title: t('title'),
   });
 
-  console.log(
-    'listData',
-    QUESTION_ORDER_KEYS.filter((v) => v !== 'unanswered').slice(0, 5),
-  );
-
   return (
     <Row className="pt-4 mb-5">
       <Col className="page-main flex-auto">

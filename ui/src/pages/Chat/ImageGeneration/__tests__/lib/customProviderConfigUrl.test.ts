@@ -3,7 +3,7 @@ import {
   getCustomProviderConfigUrl,
   isImportableConfigUrl,
   loadCustomProviderSettingsFromUrl,
-} from '../../../../../src/pages/Chat/ImageGeneration/lib/customProviderConfigUrl'
+} from '@/pages/Chat/ImageGeneration/lib/customProviderConfigUrl'
 
 describe('custom provider config URL', () => {
   it('returns config URL when default API URL points to .json', () => {
