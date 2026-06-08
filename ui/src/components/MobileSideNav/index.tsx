@@ -50,13 +50,21 @@ const MobileSideNav = ({ show, onHide }) => {
     isChat && new URLSearchParams(search).get('workspace') === 'video';
   const isUserSideNavPage =
     pathname === '/users' ||
+    pathname.startsWith('/users/settings') ||
+    pathname.startsWith('/users/notifications') ||
     /^\/users\/[^/]+(\/(answers|questions|bookmarks|reputation|badges|votes))?$/.test(
       pathname,
     );
-  const isCommunityPage =
+  const isQuestionSideNavPage =
     pathname.startsWith('/questions') ||
+    pathname.startsWith('/linked') ||
+    pathname.startsWith('/posts/');
+  const isCommunityPage =
+    isQuestionSideNavPage ||
+    pathname.startsWith('/search') ||
     pathname.startsWith('/tags') ||
     isUserSideNavPage ||
+    pathname.startsWith('/leaderboard') ||
     pathname.startsWith('/badges') ||
     pathname.startsWith('/review');
   const isTaskPage = pathname.startsWith('/tasks');

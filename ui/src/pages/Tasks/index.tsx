@@ -67,6 +67,83 @@ const renderTaskLinks = (items?: string[]) =>
     <span className="task-square-detail-empty">暂无</span>
   );
 
+const TaskDetailContent: FC<{ task: TaskItem }> = ({ task }) => {
+  const canViewPrivateFields = task.can_view_private_fields;
+
+  return (
+    <div className="task-square-detail-panel">
+      {canViewPrivateFields ? (
+        <>
+          <div className="task-square-detail-section task-square-detail-section-wide">
+            <strong>任务详情</strong>
+            {renderTaskText(task.description)}
+          </div>
+          <div className="task-square-detail-section">
+            <strong>提交要求</strong>
+            {renderTaskText(task.submission_requirements)}
+          </div>
+          <div className="task-square-detail-section">
+            <strong>附件/链接</strong>
+            {renderTaskLinks(task.attachments)}
+          </div>
+          <div className="task-square-detail-section">
+            <strong>
+              {task.status === 'rejected' ? '拒绝理由' : '审核说明'}
+            </strong>
+            {renderTaskText(task.review_comment)}
+          </div>
+          {task.submission ? (
+            <>
+              <div className="task-square-detail-section task-square-detail-section-wide">
+                <strong>提交成果</strong>
+                {renderTaskText(task.submission.content)}
+              </div>
+              <div className="task-square-detail-section">
+                <strong>成果链接</strong>
+                {renderTaskLinks(task.submission.links)}
+              </div>
+              <div className="task-square-detail-section">
+                <strong>
+                  {task.submission.status === 'rejected'
+                    ? '退回理由'
+                    : '验收说明'}
+                </strong>
+                {renderTaskText(task.submission.review_note)}
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : (
+        <div className="task-square-private-notice">
+          需求详情、附件/链接和审核说明仅发布人、领取人、管理员或版主可见。
+        </div>
+      )}
+      <div className="task-square-detail-section task-square-detail-meta">
+        <strong>后台记录</strong>
+        <span>任务 ID：{task.id}</span>
+        <span>
+          审核人：
+          {task.reviewer_id && task.reviewer_id !== '0'
+            ? task.reviewer_id
+            : '暂无'}
+        </span>
+        {task.claimed_at ? (
+          <span>
+            领取时间：
+            <FormatTime time={task.claimed_at} />
+          </span>
+        ) : null}
+        {task.completed_at ? (
+          <span>
+            完成时间：
+            <FormatTime time={task.completed_at} />
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
 const Tasks: FC = () => {
   const [params] = useSearchParams();
   const page = Number(params.get('page')) || 1;
@@ -79,7 +156,7 @@ const Tasks: FC = () => {
   const [submitTarget, setSubmitTarget] = useState<TaskItem | null>(null);
   const [submitContent, setSubmitContent] = useState('');
   const [submitLinks, setSubmitLinks] = useState('');
-  const [expandedTaskID, setExpandedTaskID] = useState<number | null>(null);
+  const [detailTarget, setDetailTarget] = useState<TaskItem | null>(null);
   const currentUserID = loggedUserInfoStore((state) => state.user.id);
   const tasks = mine
     ? data?.list || []
@@ -128,19 +205,28 @@ const Tasks: FC = () => {
     }
   };
 
-  const toggleTaskDetail = (taskID: number) => {
-    setExpandedTaskID((current) => (current === taskID ? null : taskID));
+  const canSubmitTask = (task: TaskItem) => {
+    return task.status === 'in_progress' && task.assignee_id === currentUserID;
+  };
+
+  const openTaskDetail = (task: TaskItem) => {
+    setDetailTarget(task);
   };
 
   const handleTaskKeyDown = (
     evt: KeyboardEvent<HTMLElement>,
-    taskID: number,
+    task: TaskItem,
   ) => {
     if (evt.key !== 'Enter' && evt.key !== ' ') {
       return;
     }
     evt.preventDefault();
-    toggleTaskDetail(taskID);
+    openTaskDetail(task);
+  };
+
+  const openSubmitModal = (task: TaskItem) => {
+    setDetailTarget(null);
+    setSubmitTarget(task);
   };
 
   return (
@@ -187,9 +273,7 @@ const Tasks: FC = () => {
           const visibleTags = task.tags.filter((tag) => tag !== '精选');
           const activityTime =
             task.deadline || task.completed_at || task.updated_at;
-          const expanded = expandedTaskID === task.id;
-          const canSubmit =
-            task.status === 'in_progress' && task.assignee_id === currentUserID;
+          const canSubmit = canSubmitTask(task);
 
           return (
             <ListGroup.Item
@@ -198,13 +282,13 @@ const Tasks: FC = () => {
                 isFeatured
                   ? 'question-list-row-featured'
                   : 'border-start-0 border-end-0'
-              } ${expanded ? 'task-square-card-expanded' : ''}`}
+              }`}
               key={task.id}
               role="button"
               tabIndex={0}
-              aria-expanded={expanded}
-              onClick={() => toggleTaskDetail(task.id)}
-              onKeyDown={(evt) => handleTaskKeyDown(evt, task.id)}>
+              aria-haspopup="dialog"
+              onClick={() => openTaskDetail(task)}
+              onKeyDown={(evt) => handleTaskKeyDown(evt, task)}>
               <div className="question-list-grid task-square-card-grid">
                 <div className="question-list-main task-square-card-main">
                   <h5 className="question-list-title text-wrap text-break task-square-card-title">
@@ -235,9 +319,7 @@ const Tasks: FC = () => {
                       ))}
                     </div>
                   ) : null}
-                  <span className="task-square-detail-hint">
-                    {expanded ? '收起详情' : '查看详情'}
-                  </span>
+                  <span className="task-square-detail-hint">查看详情</span>
                 </div>
 
                 <div className="question-list-metric task-square-reward">
@@ -262,7 +344,7 @@ const Tasks: FC = () => {
                       <Button
                         size="sm"
                         variant="outline-primary"
-                        onClick={() => setSubmitTarget(task)}>
+                        onClick={() => openSubmitModal(task)}>
                         提交
                       </Button>
                     ) : null}
@@ -281,70 +363,6 @@ const Tasks: FC = () => {
                   )}
                 </div>
               </div>
-              {expanded ? (
-                <div className="task-square-detail-panel">
-                  <div className="task-square-detail-section task-square-detail-section-wide">
-                    <strong>任务详情</strong>
-                    {renderTaskText(task.description)}
-                  </div>
-                  <div className="task-square-detail-section">
-                    <strong>提交要求</strong>
-                    {renderTaskText(task.submission_requirements)}
-                  </div>
-                  <div className="task-square-detail-section">
-                    <strong>附件/链接</strong>
-                    {renderTaskLinks(task.attachments)}
-                  </div>
-                  <div className="task-square-detail-section">
-                    <strong>
-                      {task.status === 'rejected' ? '拒绝理由' : '审核说明'}
-                    </strong>
-                    {renderTaskText(task.review_comment)}
-                  </div>
-                  {task.submission ? (
-                    <>
-                      <div className="task-square-detail-section task-square-detail-section-wide">
-                        <strong>提交成果</strong>
-                        {renderTaskText(task.submission.content)}
-                      </div>
-                      <div className="task-square-detail-section">
-                        <strong>成果链接</strong>
-                        {renderTaskLinks(task.submission.links)}
-                      </div>
-                      <div className="task-square-detail-section">
-                        <strong>
-                          {task.submission.status === 'rejected'
-                            ? '退回理由'
-                            : '验收说明'}
-                        </strong>
-                        {renderTaskText(task.submission.review_note)}
-                      </div>
-                    </>
-                  ) : null}
-                  <div className="task-square-detail-section task-square-detail-meta">
-                    <strong>后台记录</strong>
-                    <span>任务 ID：{task.id}</span>
-                    <span>
-                      审核人：
-                      {task.reviewer_id && task.reviewer_id !== '0'
-                        ? task.reviewer_id
-                        : '暂无'}
-                    </span>
-                    {task.claimed_at ? (
-                      <span>
-                        领取时间：
-                        <FormatTime time={task.claimed_at} />
-                      </span>
-                    ) : null}
-                    {task.completed_at ? (
-                      <span>
-                        完成时间：
-                        <FormatTime time={task.completed_at} />
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
             </ListGroup.Item>
           );
         })}
@@ -354,6 +372,87 @@ const Tasks: FC = () => {
         pageSize={PAGE_SIZE}
         totalSize={data?.count || 0}
       />
+
+      <Modal
+        show={Boolean(detailTarget)}
+        onHide={() => setDetailTarget(null)}
+        dialogClassName="task-square-detail-modal"
+        centered
+        size="lg">
+        {detailTarget ? (
+          <>
+            <Modal.Header closeButton>
+              <Modal.Title>任务详情</Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+              <div className="task-square-modal-heading">
+                <h4>{detailTarget.title}</h4>
+                <div className="task-square-modal-meta">
+                  <span>
+                    发布人：
+                    {detailTarget.user_display_name || detailTarget.user_id}
+                  </span>
+                  {detailTarget.assignee_id &&
+                  detailTarget.assignee_id !== '0' ? (
+                    <span>
+                      领取人：
+                      {detailTarget.assignee_display_name ||
+                        detailTarget.assignee_id}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              <div className="task-square-modal-summary">
+                <div>
+                  <span>奖励</span>
+                  <strong>{detailTarget.reward_points}</strong>
+                </div>
+                <div>
+                  <span>状态</span>
+                  <strong
+                    className={`task-square-status-pill task-square-status-pill-${detailTarget.status}`}>
+                    {statusText[detailTarget.status] || detailTarget.status}
+                  </strong>
+                </div>
+                <div>
+                  <span>时间</span>
+                  {detailTarget.deadline ||
+                  detailTarget.completed_at ||
+                  detailTarget.updated_at ? (
+                    <strong>
+                      <FormatTime
+                        time={
+                          detailTarget.deadline ||
+                          detailTarget.completed_at ||
+                          detailTarget.updated_at
+                        }
+                      />
+                    </strong>
+                  ) : (
+                    <strong>无截止</strong>
+                  )}
+                </div>
+              </div>
+              <TaskDetailContent task={detailTarget} />
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="link" onClick={() => setDetailTarget(null)}>
+                关闭
+              </Button>
+              {detailTarget.status === 'open' ? (
+                <Button onClick={() => handleClaim(detailTarget)}>领取</Button>
+              ) : null}
+              {canSubmitTask(detailTarget) ? (
+                <Button
+                  variant="outline-primary"
+                  onClick={() => openSubmitModal(detailTarget)}>
+                  提交成果
+                </Button>
+              ) : null}
+            </Modal.Footer>
+          </>
+        ) : null}
+      </Modal>
 
       <Modal
         show={Boolean(submitTarget)}

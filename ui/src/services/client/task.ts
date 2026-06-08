@@ -25,7 +25,12 @@ export interface TaskListParams {
 export interface TaskCreateParams {
   title: string;
   description: string;
+  tags?: string[];
+  reward_points?: number;
+  deadline?: number;
+  submission_requirements?: string;
   attachments?: string[];
+  review_comment?: string;
 }
 
 export interface TaskSubmitParams {
@@ -81,6 +86,7 @@ export interface TaskItem {
   review_comment: string;
   claimed_at: number;
   completed_at: number;
+  can_view_private_fields: boolean;
   submission?: TaskSubmission;
 }
 
@@ -107,6 +113,22 @@ export interface PointTransaction {
   balance: number;
   description: string;
   operator_id: string;
+}
+
+export interface PointRankingUser {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar: string;
+  balance: number;
+}
+
+export interface ContributionRankingUser {
+  username: string;
+  rank: number;
+  vote_count: number;
+  display_name: string;
+  avatar: string;
 }
 
 export interface FeaturedPost {
@@ -148,6 +170,18 @@ export const usePointAccount = () =>
     request.instance.get,
   );
 
+export const usePointRanking = () =>
+  useSWR<PointRankingUser[]>(
+    '/answer/api/v1/points/ranking',
+    request.instance.get,
+  );
+
+export const useContributionRanking = () =>
+  useSWR<ContributionRankingUser[]>(
+    '/answer/api/v1/contribution/ranking',
+    request.instance.get,
+  );
+
 export const usePointTransactions = (params: {
   page?: number;
   page_size?: number;
@@ -163,14 +197,26 @@ export const useAdminTasks = (params: TaskListParams) =>
     request.instance.get,
   );
 
+export const getReviewTasks = (params: TaskListParams) =>
+  request.get<{ count: number; list: TaskItem[] }>(
+    `/answer/api/v1/review/tasks?${qs.stringify(params)}`,
+  );
+
 export const reviewTask = (params: AdminTaskReviewParams) =>
   request.put('/answer/admin/api/task/review', params);
+
+export const reviewTaskInCenter = (params: AdminTaskReviewParams) =>
+  request.put('/answer/api/v1/review/task', params);
 
 export const assignTask = (params: { id: number; assignee_id: string }) =>
   request.put('/answer/admin/api/task/assign', params);
 
 export const reviewTaskSubmission = (params: AdminTaskSubmissionReviewParams) =>
   request.put('/answer/admin/api/task/submission/review', params);
+
+export const reviewTaskSubmissionInCenter = (
+  params: AdminTaskSubmissionReviewParams,
+) => request.put('/answer/api/v1/review/task/submission', params);
 
 export const useFeaturedPosts = (params: {
   page?: number;

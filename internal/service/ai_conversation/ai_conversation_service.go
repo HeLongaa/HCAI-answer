@@ -30,7 +30,6 @@ import (
 	"github.com/apache/answer/internal/entity"
 	"github.com/apache/answer/internal/repo/ai_conversation"
 	"github.com/apache/answer/internal/schema"
-	usercommon "github.com/apache/answer/internal/service/user_common"
 	"github.com/apache/answer/pkg/token"
 	"github.com/segmentfault/pacman/errors"
 	"github.com/segmentfault/pacman/log"
@@ -45,9 +44,6 @@ type AIConversationService interface {
 	VoteRecord(ctx context.Context, req *schema.AIConversationVoteReq) error
 	SwitchBranch(ctx context.Context, req *schema.AIConversationBranchSwitchReq) error
 	DeleteRecord(ctx context.Context, req *schema.AIConversationRecordDeleteReq) error
-	GetConversationListForAdmin(ctx context.Context, req *schema.AIConversationAdminListReq) (*pager.PageModel, error)
-	GetConversationDetailForAdmin(ctx context.Context, req *schema.AIConversationAdminDetailReq) (*schema.AIConversationAdminDetailResp, error)
-	DeleteConversationForAdmin(ctx context.Context, req *schema.AIConversationAdminDeleteReq) error
 }
 
 // ConversationMessage
@@ -78,17 +74,14 @@ type ConversationAttachments struct {
 // aiConversationService
 type aiConversationService struct {
 	aiConversationRepo ai_conversation.AIConversationRepo
-	userCommon         *usercommon.UserCommon
 }
 
 // NewAIConversationService
 func NewAIConversationService(
 	aiConversationRepo ai_conversation.AIConversationRepo,
-	userCommon *usercommon.UserCommon,
 ) AIConversationService {
 	return &aiConversationService{
 		aiConversationRepo: aiConversationRepo,
-		userCommon:         userCommon,
 	}
 }
 
@@ -387,108 +380,6 @@ func (s *aiConversationService) VoteRecord(ctx context.Context, req *schema.AICo
 	return nil
 }
 
-// GetConversationListForAdmin
-func (s *aiConversationService) GetConversationListForAdmin(
-	ctx context.Context, req *schema.AIConversationAdminListReq) (*pager.PageModel, error) {
-	conversations, total, err := s.aiConversationRepo.GetConversationsForAdmin(ctx, req.Page, req.PageSize, &entity.AIConversation{})
-	if err != nil {
-		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
-	}
-
-	list := make([]*schema.AIConversationAdminListItem, 0, len(conversations))
-	for _, conversation := range conversations {
-		userInfo, err := s.getUserInfo(ctx, conversation.UserID)
-		if err != nil {
-			log.Errorf("get user info failed for user %s: %v", conversation.UserID, err)
-			continue
-		}
-
-		helpful, unhelpful, err := s.aiConversationRepo.GetConversationWithVoteStats(ctx, conversation.ConversationID)
-		if err != nil {
-			log.Errorf("get conversation vote stats failed for conversation %s: %v", conversation.ConversationID, err)
-			continue
-		}
-
-		list = append(list, &schema.AIConversationAdminListItem{
-			ID:             conversation.ConversationID,
-			Topic:          conversation.Topic,
-			UserInfo:       userInfo,
-			HelpfulCount:   helpful,
-			UnhelpfulCount: unhelpful,
-			CreatedAt:      conversation.CreatedAt.Unix(),
-		})
-	}
-
-	return pager.NewPageModel(total, list), nil
-}
-
-// GetConversationDetailForAdmin
-func (s *aiConversationService) GetConversationDetailForAdmin(ctx context.Context, req *schema.AIConversationAdminDetailReq) (*schema.AIConversationAdminDetailResp, error) {
-	conversation, exist, err := s.aiConversationRepo.GetConversation(ctx, req.ConversationID)
-	if err != nil {
-		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
-	}
-	if !exist {
-		return nil, errors.BadRequest(reason.ObjectNotFound)
-	}
-
-	userInfo, err := s.getUserInfo(ctx, conversation.UserID)
-	if err != nil {
-		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
-	}
-
-	records, err := s.aiConversationRepo.GetRecordsByConversationID(ctx, req.ConversationID)
-	if err != nil {
-		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
-	}
-
-	recordList := make([]schema.AIConversationRecord, 0, len(records))
-	for i, record := range records {
-		if i == 0 {
-			record.Content = conversation.Topic
-		}
-		attachments := unmarshalConversationAttachments(record.Attachments)
-		recordList = append(recordList, schema.AIConversationRecord{
-			ChatCompletionID: record.ChatCompletionID,
-			Role:             record.Role,
-			Content:          record.Content,
-			Images:           attachments.Images,
-			Files:            schemaConversationFiles(attachments.Files),
-			Helpful:          record.Helpful,
-			Unhelpful:        record.Unhelpful,
-			CreatedAt:        record.CreatedAt.Unix(),
-		})
-	}
-
-	return &schema.AIConversationAdminDetailResp{
-		ConversationID: conversation.ConversationID,
-		Topic:          conversation.Topic,
-		UserInfo:       userInfo,
-		Records:        recordList,
-		CreatedAt:      conversation.CreatedAt.Unix(),
-	}, nil
-}
-
-// getUserInfo
-func (s *aiConversationService) getUserInfo(ctx context.Context, userID string) (schema.AIConversationUserInfo, error) {
-	userInfo := schema.AIConversationUserInfo{}
-
-	user, exist, err := s.userCommon.GetUserBasicInfoByID(ctx, userID)
-	if err != nil {
-		return userInfo, err
-	}
-	if !exist {
-		return userInfo, errors.BadRequest(reason.ObjectNotFound)
-	}
-
-	userInfo.ID = user.ID
-	userInfo.Username = user.Username
-	userInfo.DisplayName = user.DisplayName
-	userInfo.Avatar = user.Avatar
-	userInfo.Rank = user.Rank
-	return userInfo, nil
-}
-
 func unixOrZero(value time.Time) int64 {
 	if value.IsZero() {
 		return 0
@@ -537,21 +428,4 @@ func schemaConversationFiles(files []ConversationFile) []schema.AIConversationFi
 		})
 	}
 	return resp
-}
-
-// DeleteConversationForAdmin
-func (s *aiConversationService) DeleteConversationForAdmin(ctx context.Context, req *schema.AIConversationAdminDeleteReq) error {
-	_, exist, err := s.aiConversationRepo.GetConversation(ctx, req.ConversationID)
-	if err != nil {
-		return errors.InternalServer(reason.DatabaseError).WithError(err)
-	}
-	if !exist {
-		return errors.BadRequest(reason.ObjectNotFound)
-	}
-
-	if err := s.aiConversationRepo.DeleteConversation(ctx, req.ConversationID); err != nil {
-		return err
-	}
-
-	return nil
 }

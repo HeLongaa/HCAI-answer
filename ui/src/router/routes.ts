@@ -183,6 +183,10 @@ const routes: RouteNode[] = [
             page: 'pages/Users',
           },
           {
+            path: 'leaderboard',
+            page: 'pages/Leaderboard',
+          },
+          {
             path: 'users/:username',
             page: 'pages/Users/Personal',
           },
@@ -473,14 +477,6 @@ const routes: RouteNode[] = [
             page: 'pages/Admin/Badges',
           },
           {
-            path: 'ai-assistant',
-            page: 'pages/Admin/AiAssistant',
-          },
-          {
-            path: 'ai-settings',
-            page: 'pages/Admin/AiSettings',
-          },
-          {
             path: 'ai-chat-config',
             page: 'pages/Admin/AiChatConfig',
           },
@@ -491,10 +487,6 @@ const routes: RouteNode[] = [
           {
             path: 'apikeys',
             page: 'pages/Admin/Apikeys',
-          },
-          {
-            path: 'mcp',
-            page: 'pages/Admin/Mcp',
           },
         ],
       },

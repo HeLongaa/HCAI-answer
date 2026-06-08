@@ -48,9 +48,6 @@ type AIConversationRepo interface {
 	UpdateRecordVote(ctx context.Context, cond *entity.AIConversationRecord) error
 	GetRecord(ctx context.Context, recordID int) (*entity.AIConversationRecord, bool, error)
 	GetRecordByChatCompletionID(ctx context.Context, role, chatCompletionID string) (*entity.AIConversationRecord, bool, error)
-	GetConversationsForAdmin(ctx context.Context, page, pageSize int, cond *entity.AIConversation) (list []*entity.AIConversation, total int64, err error)
-	GetConversationWithVoteStats(ctx context.Context, conversationID string) (helpful, unhelpful int64, err error)
-	DeleteConversation(ctx context.Context, conversationID string) error
 }
 
 type aiConversationRepo struct {
@@ -209,51 +206,4 @@ func (r *aiConversationRepo) GetRecordByChatCompletionID(ctx context.Context, ro
 		return nil, false, err
 	}
 	return record, exist, nil
-}
-
-// GetConversationsForAdmin gets conversation list for admin
-func (r *aiConversationRepo) GetConversationsForAdmin(ctx context.Context, page, pageSize int, cond *entity.AIConversation) (list []*entity.AIConversation, total int64, err error) {
-	list = make([]*entity.AIConversation, 0)
-	total, err = pager.Help(page, pageSize, &list, cond, r.data.DB.Context(ctx).Desc("id"))
-	if err != nil {
-		err = errors.InternalServer(reason.DatabaseError).WithError(err).WithStack()
-	}
-	return list, total, err
-}
-
-// GetConversationWithVoteStats gets conversation vote statistics
-func (r *aiConversationRepo) GetConversationWithVoteStats(ctx context.Context, conversationID string) (helpful, unhelpful int64, err error) {
-	res, err := r.data.DB.Context(ctx).SumsInt(&entity.AIConversationRecord{ConversationID: conversationID}, "helpful", "unhelpful")
-	if err != nil {
-		log.Errorf("get ai conversation vote stats failed: %v", err)
-		return 0, 0, errors.InternalServer(reason.DatabaseError).WithError(err).WithStack()
-	}
-	if len(res) < 2 {
-		log.Errorf("get ai conversation vote stats failed: invalid result length %d", len(res))
-		return 0, 0, nil
-	}
-	return res[0], res[1], nil
-}
-
-// DeleteConversation deletes a conversation and its related records
-func (r *aiConversationRepo) DeleteConversation(ctx context.Context, conversationID string) error {
-	_, err := r.data.DB.Transaction(func(session *xorm.Session) (result any, err error) {
-		if _, err := session.Context(ctx).Where("conversation_id = ?", conversationID).Delete(&entity.AIConversationRecord{}); err != nil {
-			log.Errorf("delete ai conversation records failed: %v", err)
-			return nil, errors.InternalServer(reason.DatabaseError).WithError(err).WithStack()
-		}
-
-		if _, err := session.Context(ctx).Where("conversation_id = ?", conversationID).Delete(&entity.AIConversation{}); err != nil {
-			log.Errorf("delete ai conversation failed: %v", err)
-			return nil, errors.InternalServer(reason.DatabaseError).WithError(err).WithStack()
-		}
-
-		return nil, nil
-	})
-
-	if err != nil {
-		return err
-	}
-
-	return nil
 }

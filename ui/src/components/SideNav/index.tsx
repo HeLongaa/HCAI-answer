@@ -129,6 +129,11 @@ const Index: FC<IProps> = ({ showBrand = true }) => {
         <span>{t('header.nav.user')}</span>
       </NavLink>
 
+      <NavLink to="/leaderboard" className="nav-link">
+        <Icon name="trophy-fill" className="me-2" />
+        <span>排行榜</span>
+      </NavLink>
+
       <NavLink to="/badges" className="nav-link">
         <Icon name="award-fill" className="me-2" />
         <span>{t('header.nav.badges')}</span>

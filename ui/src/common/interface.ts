@@ -826,36 +826,10 @@ export interface AddOrEditApiKeyParams {
   id?: number;
 }
 
-export interface AiConfig {
-  enabled: boolean;
-  chosen_provider: string;
-  ai_providers: Array<{
-    provider: string;
-    api_host: string;
-    api_key: string;
-    model: string;
-  }>;
-}
-
-export interface AiProviderItem {
-  name: string;
-  display_name: string;
-  default_api_host: string;
-}
-
 export interface ConversationListItem {
   conversation_id: string;
   created_at: number;
   topic: string;
-}
-
-export interface AdminConversationListItem {
-  id: string;
-  topic: string;
-  helpful_count: number;
-  unhelpful_count: number;
-  created_at: number;
-  user_info: UserInfoBase;
 }
 
 export interface ConversationDetailItem {

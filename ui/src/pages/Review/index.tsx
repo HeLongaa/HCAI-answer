@@ -18,13 +18,12 @@
  */
 
 import { FC, useEffect, useState } from 'react';
-import { Row, Col } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 
 import { usePageTags } from '@/hooks';
 import { Empty } from '@/components';
-import { getReviewType } from '@/services';
+import { getReviewTasks, getReviewType } from '@/services';
 import type * as Type from '@/common/interface';
 
 import {
@@ -32,7 +31,27 @@ import {
   FlagContent,
   SuggestContent,
   QueuedContent,
+  TaskContent,
 } from './components';
+import './index.scss';
+
+const reviewTypeOrder = [
+  'task_request',
+  'task_in_progress',
+  'task_submission',
+  'queued_post',
+  'flagged_post',
+  'suggested_post_edit',
+];
+
+const reviewTypeLabels: Record<string, string> = {
+  task_request: '待审核需求',
+  task_in_progress: '进行中需求',
+  task_submission: '待验收任务',
+  queued_post: '排队内容',
+  flagged_post: '举报内容',
+  suggested_post_edit: '建议编辑',
+};
 
 const Index: FC = () => {
   const [urlSearch, setUrlSearchParams] = useSearchParams();
@@ -42,44 +61,80 @@ const Index: FC = () => {
   const [currentReviewType, setCurrentReviewType] = useState('');
   const [isEmpty, setIsEmpty] = useState(false);
 
-  const fetchReviewType = (changeReviewType: boolean) => {
-    getReviewType()
-      .then((resp) => {
-        if (searchType) {
-          const filterData = resp.find((item) => item.name === searchType);
-          if (Number(filterData?.todo_amount) > 0) {
-            setCurrentReviewType(filterData?.name || '');
-          } else {
-            setIsEmpty(true);
-          }
-        } else {
-          const filterData = resp.filter((item) => item.todo_amount > 0);
-          if (filterData.length > 0) {
-            if (changeReviewType) {
-              setCurrentReviewType(filterData[0].name);
-            } else {
-              const currentTypeItem = resp.find(
-                (item) => item.name === currentReviewType,
-              );
-              if (currentTypeItem?.todo_amount === 0) {
-                setCurrentReviewType(filterData[0].name);
-              }
-            }
-          } else {
-            setIsEmpty(true);
-          }
-        }
-        setReviewTypeList(resp);
-      })
-      .catch((ex) => {
-        console.error('getReviewType error: ', ex);
-      });
+  const fetchReviewType = async (changeReviewType: boolean) => {
+    try {
+      const [
+        legacyReviewResult,
+        taskRequestResult,
+        taskInProgressResult,
+        taskSubmissionResult,
+      ] = await Promise.allSettled([
+        getReviewType(),
+        getReviewTasks({ page: 1, page_size: 1, status: 'pending_review' }),
+        getReviewTasks({ page: 1, page_size: 1, status: 'in_progress' }),
+        getReviewTasks({ page: 1, page_size: 1, status: 'submitted' }),
+      ]);
+      const legacyReviewTypes =
+        legacyReviewResult.status === 'fulfilled'
+          ? legacyReviewResult.value
+          : [];
+      const taskRequestCount =
+        taskRequestResult.status === 'fulfilled'
+          ? taskRequestResult.value.count
+          : 0;
+      const taskInProgressCount =
+        taskInProgressResult.status === 'fulfilled'
+          ? taskInProgressResult.value.count
+          : 0;
+      const taskSubmissionCount =
+        taskSubmissionResult.status === 'fulfilled'
+          ? taskSubmissionResult.value.count
+          : 0;
+      const legacyAmountByName = new Map(
+        legacyReviewTypes.map((item) => [item.name, item.todo_amount]),
+      );
+      const nextReviewTypes = reviewTypeOrder.map((name) => ({
+        name,
+        label: reviewTypeLabels[name],
+        todo_amount:
+          name === 'task_request'
+            ? taskRequestCount
+            : name === 'task_in_progress'
+              ? taskInProgressCount
+              : name === 'task_submission'
+                ? taskSubmissionCount
+                : legacyAmountByName.get(name) || 0,
+      }));
+      const nextType = searchType
+        ? nextReviewTypes.find((item) => item.name === searchType)?.name
+        : undefined;
+      const fallbackType =
+        nextReviewTypes.find((item) => item.todo_amount > 0)?.name ||
+        nextReviewTypes[0]?.name ||
+        '';
+      const selectedType =
+        nextType ||
+        (changeReviewType || !currentReviewType
+          ? fallbackType
+          : currentReviewType);
+      const selectedItem = nextReviewTypes.find(
+        (item) => item.name === selectedType,
+      );
+
+      setCurrentReviewType(selectedType);
+      setIsEmpty((selectedItem?.todo_amount || 0) <= 0);
+      setReviewTypeList(nextReviewTypes);
+    } catch (ex) {
+      console.error('getReviewType error: ', ex);
+    }
   };
 
   const handleTypeChange = (name) => {
-    urlSearch.delete('type');
+    urlSearch.set('type', name);
     setUrlSearchParams(urlSearch);
     setCurrentReviewType(name);
+    const selectedItem = reviewTypeList?.find((item) => item.name === name);
+    setIsEmpty((selectedItem?.todo_amount || 0) <= 0);
   };
 
   useEffect(() => {
@@ -91,9 +146,35 @@ const Index: FC = () => {
   });
 
   return (
-    <Row className="pt-4 mb-5">
-      <h3 className="mb-4">{t('review')}</h3>
-      <Col className="page-main flex-auto">
+    <div className="review-page py-4 mb-5">
+      <h3 className="mb-3">{t('review')}</h3>
+      <ReviewType
+        list={reviewTypeList}
+        checked={currentReviewType}
+        callback={handleTypeChange}
+      />
+      <div className="review-page-main">
+        {currentReviewType === 'task_request' && (
+          <TaskContent
+            status="pending_review"
+            refreshCount={() => fetchReviewType(false)}
+          />
+        )}
+
+        {currentReviewType === 'task_in_progress' && (
+          <TaskContent
+            status="in_progress"
+            refreshCount={() => fetchReviewType(false)}
+          />
+        )}
+
+        {currentReviewType === 'task_submission' && (
+          <TaskContent
+            status="submitted"
+            refreshCount={() => fetchReviewType(false)}
+          />
+        )}
+
         {currentReviewType === 'suggested_post_edit' && (
           <SuggestContent refreshCount={() => fetchReviewType(false)} />
         )}
@@ -106,16 +187,8 @@ const Index: FC = () => {
           <QueuedContent refreshCount={() => fetchReviewType(false)} />
         )}
         {isEmpty && <Empty>{t('empty')}</Empty>}
-      </Col>
-
-      <Col className="page-right-side mt-4 mt-xl-0">
-        <ReviewType
-          list={reviewTypeList}
-          checked={currentReviewType}
-          callback={handleTypeChange}
-        />
-      </Col>
-    </Row>
+      </div>
+    </div>
   );
 };
 

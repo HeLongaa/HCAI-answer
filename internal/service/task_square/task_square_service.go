@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/apache/answer/internal/entity"
 	"github.com/apache/answer/internal/schema"
 	"github.com/apache/answer/internal/service/realtime"
+	"github.com/apache/answer/internal/service/siteinfo_common"
 	"github.com/apache/answer/internal/service/unique"
 	"github.com/apache/answer/pkg/uid"
 	"github.com/segmentfault/pacman/errors"
@@ -45,13 +47,24 @@ func isPublicTaskStatus(status string) bool {
 }
 
 type TaskSquareService struct {
-	data         *data.Data
-	uniqueIDRepo unique.UniqueIDRepo
-	realtime     *realtime.Service
+	data            *data.Data
+	uniqueIDRepo    unique.UniqueIDRepo
+	realtime        *realtime.Service
+	siteInfoService siteinfo_common.SiteInfoCommonService
 }
 
-func NewTaskSquareService(data *data.Data, uniqueIDRepo unique.UniqueIDRepo, realtime *realtime.Service) *TaskSquareService {
-	return &TaskSquareService{data: data, uniqueIDRepo: uniqueIDRepo, realtime: realtime}
+func NewTaskSquareService(
+	data *data.Data,
+	uniqueIDRepo unique.UniqueIDRepo,
+	realtime *realtime.Service,
+	siteInfoService siteinfo_common.SiteInfoCommonService,
+) *TaskSquareService {
+	return &TaskSquareService{
+		data:            data,
+		uniqueIDRepo:    uniqueIDRepo,
+		realtime:        realtime,
+		siteInfoService: siteInfoService,
+	}
 }
 
 func encodeList(values []string) string {
@@ -83,18 +96,42 @@ func unixTime(t time.Time) int64 {
 
 func (s *TaskSquareService) CreateTask(ctx context.Context, req *schema.TaskCreateReq) error {
 	status := entity.TaskStatusPendingReview
+	cols := []string{"user_id", "title", "description", "attachments", "status"}
+	var deadline time.Time
+	tags := []string{}
+	rewardPoints := 0
+	submissionRequirements := ""
+	reviewComment := ""
+	reviewerID := ""
 	if req.IsAdminModerator {
 		status = entity.TaskStatusOpen
+		cols = append(cols,
+			"tags", "reward_points", "deadline", "submission_requirements", "review_comment", "reviewer_id",
+		)
+		tags = req.Tags
+		rewardPoints = req.RewardPoints
+		submissionRequirements = req.SubmissionRequirements
+		reviewComment = req.ReviewComment
+		reviewerID = req.UserID
+		if req.Deadline > 0 {
+			deadline = time.Unix(req.Deadline, 0)
+		}
 	}
 	task := &entity.Task{
-		UserID:      req.UserID,
-		Title:       req.Title,
-		Description: req.Description,
-		Attachments: encodeList(req.Attachments),
-		Status:      status,
+		UserID:                 req.UserID,
+		ReviewerID:             reviewerID,
+		Title:                  req.Title,
+		Description:            req.Description,
+		Tags:                   encodeList(tags),
+		RewardPoints:           rewardPoints,
+		Deadline:               deadline,
+		SubmissionRequirements: submissionRequirements,
+		Attachments:            encodeList(req.Attachments),
+		Status:                 status,
+		ReviewComment:          reviewComment,
 	}
 	_, err := s.data.DB.Context(ctx).
-		Cols("user_id", "title", "description", "attachments", "status").
+		Cols(cols...).
 		Insert(task)
 	if err == nil {
 		s.publishTaskChanged(task, req.UserID)
@@ -127,7 +164,7 @@ func (s *TaskSquareService) ListTasks(ctx context.Context, req *schema.TaskListR
 	}
 	resp := make([]*schema.TaskResp, 0, len(tasks))
 	for _, task := range tasks {
-		taskResp, err := s.taskResp(ctx, task)
+		taskResp, err := s.taskResp(ctx, task, req.UserID, req.IsAdmin || req.IsAdminModerator)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +185,7 @@ func (s *TaskSquareService) GetTask(ctx context.Context, id int, userID string, 
 	if !isAdmin && !isPublicTaskStatus(task.Status) && task.UserID != userID && task.AssigneeID != userID {
 		return nil, errors.Forbidden(reason.ForbiddenError)
 	}
-	return s.taskResp(ctx, task)
+	return s.taskResp(ctx, task, userID, isAdmin)
 }
 
 func (s *TaskSquareService) ReviewTask(ctx context.Context, req *schema.TaskReviewReq) error {
@@ -445,6 +482,91 @@ func (s *TaskSquareService) GetPointAccount(ctx context.Context, userID string) 
 	return &schema.PointAccountResp{Balance: account.Balance}, nil
 }
 
+func (s *TaskSquareService) ListPointRanking(ctx context.Context) ([]*schema.PointRankingResp, error) {
+	accounts := make([]*entity.UserPointAccount, 0)
+	if err := s.data.DB.Context(ctx).Find(&accounts); err != nil {
+		return nil, err
+	}
+	balanceByUserID := make(map[string]int, len(accounts))
+	for _, account := range accounts {
+		balanceByUserID[account.UserID] = account.Balance
+	}
+	users := make([]*entity.User, 0)
+	if err := s.data.DB.Context(ctx).
+		Where("status != ?", entity.UserStatusDeleted).
+		Find(&users); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(users, func(i, j int) bool {
+		leftBalance := balanceByUserID[users[i].ID]
+		rightBalance := balanceByUserID[users[j].ID]
+		if leftBalance != rightBalance {
+			return leftBalance > rightBalance
+		}
+		if users[i].Rank != users[j].Rank {
+			return users[i].Rank > users[j].Rank
+		}
+		return users[i].ID < users[j].ID
+	})
+	if len(users) > 50 {
+		users = users[:50]
+	}
+	avatarMapping := s.formatAvatarMapping(ctx, users)
+	resp := make([]*schema.PointRankingResp, 0, len(users))
+	for _, user := range users {
+		resp = append(resp, &schema.PointRankingResp{
+			UserID:      user.ID,
+			Username:    user.Username,
+			DisplayName: user.DisplayName,
+			Avatar:      avatarMapping[user.ID],
+			Balance:     balanceByUserID[user.ID],
+		})
+	}
+	return resp, nil
+}
+
+func (s *TaskSquareService) ListContributionRanking(ctx context.Context) ([]*schema.UserRankingSimpleInfo, error) {
+	users := make([]*entity.User, 0)
+	if err := s.data.DB.Context(ctx).
+		Where("status != ?", entity.UserStatusDeleted).
+		Desc("rank").
+		Asc("id").
+		Limit(50).
+		Find(&users); err != nil {
+		return nil, err
+	}
+	avatarMapping := s.formatAvatarMapping(ctx, users)
+	resp := make([]*schema.UserRankingSimpleInfo, 0, len(users))
+	for _, user := range users {
+		resp = append(resp, &schema.UserRankingSimpleInfo{
+			Username:    user.Username,
+			Rank:        user.Rank,
+			DisplayName: user.DisplayName,
+			Avatar:      avatarMapping[user.ID],
+		})
+	}
+	return resp, nil
+}
+
+func (s *TaskSquareService) formatAvatarMapping(ctx context.Context, users []*entity.User) map[string]string {
+	resp := make(map[string]string, len(users))
+	if s.siteInfoService != nil {
+		avatarMapping := s.siteInfoService.FormatListAvatar(ctx, users)
+		for _, user := range users {
+			if avatar := avatarMapping[user.ID]; avatar != nil {
+				resp[user.ID] = avatar.GetURL()
+			}
+		}
+		return resp
+	}
+	for _, user := range users {
+		avatar := &schema.AvatarInfo{}
+		_ = json.Unmarshal([]byte(user.Avatar), avatar)
+		resp[user.ID] = avatar.GetURL()
+	}
+	return resp
+}
+
 func (s *TaskSquareService) ListPointTransactions(ctx context.Context, req *schema.PointTransactionReq) (*pager.PageModel, error) {
 	req.Page, req.PageSize = pager.ValPageAndPageSize(req.Page, req.PageSize)
 	items := make([]*entity.PointTransaction, 0)
@@ -622,7 +744,14 @@ func (s *TaskSquareService) revokeFeaturedPostReward(ctx context.Context, questi
 	return nil
 }
 
-func (s *TaskSquareService) taskResp(ctx context.Context, task *entity.Task) (*schema.TaskResp, error) {
+func (s *TaskSquareService) canViewTaskPrivateFields(task *entity.Task, userID string, isAdmin bool) bool {
+	return isAdmin ||
+		(task != nil && task.UserID != "" && task.UserID == userID) ||
+		(task != nil && task.AssigneeID != "" && task.AssigneeID != "0" && task.AssigneeID == userID)
+}
+
+func (s *TaskSquareService) taskResp(ctx context.Context, task *entity.Task, userID string, isAdmin bool) (*schema.TaskResp, error) {
+	canViewPrivateFields := s.canViewTaskPrivateFields(task, userID, isAdmin)
 	resp := &schema.TaskResp{
 		ID: task.ID, CreatedAt: unixTime(task.CreatedAt), UpdatedAt: unixTime(task.UpdatedAt), UserID: task.UserID,
 		UserDisplayName: s.userName(ctx, task.UserID), ReviewerID: task.ReviewerID, AssigneeID: task.AssigneeID,
@@ -630,13 +759,20 @@ func (s *TaskSquareService) taskResp(ctx context.Context, task *entity.Task) (*s
 		Tags: decodeList(task.Tags), RewardPoints: task.RewardPoints, Deadline: unixTime(task.Deadline),
 		SubmissionRequirements: task.SubmissionRequirements, Attachments: decodeList(task.Attachments), Status: task.Status,
 		ReviewComment: task.ReviewComment, ClaimedAt: unixTime(task.ClaimedAt), CompletedAt: unixTime(task.CompletedAt),
+		CanViewPrivateFields: canViewPrivateFields,
+	}
+	if !canViewPrivateFields {
+		resp.Description = ""
+		resp.SubmissionRequirements = ""
+		resp.Attachments = []string{}
+		resp.ReviewComment = ""
 	}
 	sub := &entity.TaskSubmission{}
 	has, err := s.data.DB.Context(ctx).Where("task_id = ?", task.ID).Desc("id").Get(sub)
 	if err != nil {
 		return nil, err
 	}
-	if has {
+	if has && canViewPrivateFields {
 		resp.Submission = &schema.TaskSubmissionResp{
 			ID: sub.ID, CreatedAt: unixTime(sub.CreatedAt), UpdatedAt: unixTime(sub.UpdatedAt), TaskID: sub.TaskID,
 			UserID: sub.UserID, ReviewerID: sub.ReviewerID, Content: sub.Content, Links: decodeList(sub.Links),

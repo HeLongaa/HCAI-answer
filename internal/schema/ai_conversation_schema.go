@@ -98,50 +98,6 @@ type AIConversationRecordDeleteReq struct {
 	UserID         string `validate:"omitempty" json:"-"`
 }
 
-// AIConversationAdminListReq ai conversation admin list req
-type AIConversationAdminListReq struct {
-	Page     int `validate:"omitempty,min=1" form:"page"`
-	PageSize int `validate:"omitempty,min=1" form:"page_size"`
-}
-
-// AIConversationAdminListItem ai conversation admin list item
-type AIConversationAdminListItem struct {
-	ID             string                 `json:"id"`
-	Topic          string                 `json:"topic"`
-	UserInfo       AIConversationUserInfo `json:"user_info"`
-	HelpfulCount   int64                  `json:"helpful_count"`
-	UnhelpfulCount int64                  `json:"unhelpful_count"`
-	CreatedAt      int64                  `json:"created_at"`
-}
-
-// AIConversationUserInfo ai conversation user info
-type AIConversationUserInfo struct {
-	ID          string `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	Avatar      string `json:"avatar"`
-	Rank        int    `json:"rank"`
-}
-
-// AIConversationAdminDetailReq ai conversation admin detail req
-type AIConversationAdminDetailReq struct {
-	ConversationID string `validate:"required" form:"conversation_id" json:"conversation_id"`
-}
-
-// AIConversationAdminDetailResp ai conversation admin detail resp
-type AIConversationAdminDetailResp struct {
-	ConversationID string                 `json:"conversation_id"`
-	Topic          string                 `json:"topic"`
-	UserInfo       AIConversationUserInfo `json:"user_info"`
-	Records        []AIConversationRecord `json:"records"`
-	CreatedAt      int64                  `json:"created_at"`
-}
-
-// AIConversationAdminDeleteReq admin delete ai
-type AIConversationAdminDeleteReq struct {
-	ConversationID string `validate:"required" json:"conversation_id"`
-}
-
 func (req *AIConversationDetailReq) Check() (errFields []*validator.FormErrorField, err error) {
 	return nil, nil
 }

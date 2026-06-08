@@ -39,9 +39,7 @@ import (
 	"github.com/apache/answer/internal/service/siteinfo_common"
 	tagcommon "github.com/apache/answer/internal/service/tag_common"
 	"github.com/apache/answer/plugin"
-	"github.com/go-resty/resty/v2"
 	"github.com/jinzhu/copier"
-	"github.com/segmentfault/pacman/errors"
 	"github.com/segmentfault/pacman/log"
 )
 
@@ -361,99 +359,7 @@ func (s *SiteInfoService) GetSiteAI(ctx context.Context) (resp *schema.SiteAIRes
 		}
 	}
 	resp.SiteAIProviders = providers
-	s.maskAIKeys(resp)
 	return resp, nil
-}
-
-// SaveSiteAI save site AI configuration
-func (s *SiteInfoService) SaveSiteAI(ctx context.Context, req *schema.SiteAIReq) (err error) {
-	if err := s.restoreMaskedAIKeys(ctx, req); err != nil {
-		return err
-	}
-	if req.PromptConfig == nil {
-		req.PromptConfig = &schema.AIPromptConfig{
-			ZhCN: constant.DefaultAIPromptConfigZhCN,
-			EnUS: constant.DefaultAIPromptConfigEnUS,
-		}
-	}
-
-	aiProvider, err := s.GetAIProvider(ctx)
-	if err != nil {
-		return err
-	}
-
-	providerMapping := make(map[string]*schema.SiteAIProvider)
-	for _, provider := range req.SiteAIProviders {
-		providerMapping[provider.Provider] = provider
-	}
-
-	providers := make([]*schema.SiteAIProvider, 0)
-	for _, p := range aiProvider {
-		if provider, ok := providerMapping[p.Name]; ok {
-			if len(provider.APIHost) == 0 && provider.Provider == req.ChosenProvider {
-				provider.APIHost = p.DefaultAPIHost
-			}
-			providers = append(providers, provider)
-		} else {
-			providers = append(providers, &schema.SiteAIProvider{
-				Provider: p.Name,
-				APIHost:  p.DefaultAPIHost,
-			})
-		}
-	}
-	req.SiteAIProviders = providers
-
-	content, _ := json.Marshal(req)
-	siteInfo := &entity.SiteInfo{
-		Type:    constant.SiteTypeAI,
-		Content: string(content),
-		Status:  1,
-	}
-	return s.siteInfoRepo.SaveByType(ctx, constant.SiteTypeAI, siteInfo)
-}
-
-func (s *SiteInfoService) maskAIKeys(resp *schema.SiteAIResp) {
-	for _, provider := range resp.SiteAIProviders {
-		if provider.APIKey == "" {
-			continue
-		}
-		provider.APIKey = strings.Repeat("*", len(provider.APIKey))
-	}
-}
-
-func (s *SiteInfoService) restoreMaskedAIKeys(ctx context.Context, req *schema.SiteAIReq) error {
-	hasMasked := false
-	for _, provider := range req.SiteAIProviders {
-		if provider.APIKey != "" && isAllMask(provider.APIKey) {
-			hasMasked = true
-			break
-		}
-	}
-	if !hasMasked {
-		return nil
-	}
-
-	current, err := s.siteInfoCommonService.GetSiteAI(ctx)
-	if err != nil {
-		return err
-	}
-	currentMapping := make(map[string]*schema.SiteAIProvider)
-	for _, provider := range current.SiteAIProviders {
-		currentMapping[provider.Provider] = provider
-	}
-	for _, provider := range req.SiteAIProviders {
-		if provider.APIKey == "" || !isAllMask(provider.APIKey) {
-			continue
-		}
-		if stored, ok := currentMapping[provider.Provider]; ok {
-			provider.APIKey = stored.APIKey
-		}
-	}
-	return nil
-}
-
-func isAllMask(value string) bool {
-	return strings.Trim(value, "*") == ""
 }
 
 // GetSiteMCP get site MCP configuration
@@ -471,17 +377,6 @@ func (s *SiteInfoService) GetSiteMCP(ctx context.Context) (resp *schema.SiteMCPR
 	resp.URL = fmt.Sprintf("%s/answer/api/v1/mcp/sse", siteInfo.SiteUrl)
 	resp.HTTPHeader = "Authorization={key}"
 	return
-}
-
-// SaveSiteMCP save site MCP configuration
-func (s *SiteInfoService) SaveSiteMCP(ctx context.Context, req *schema.SiteMCPReq) (err error) {
-	content, _ := json.Marshal(req)
-	siteInfo := &entity.SiteInfo{
-		Type:    constant.SiteTypeMCP,
-		Content: string(content),
-		Status:  1,
-	}
-	return s.siteInfoRepo.SaveByType(ctx, constant.SiteTypeMCP, siteInfo)
 }
 
 // GetSMTPConfig get smtp config
@@ -725,65 +620,4 @@ func (s *SiteInfoService) GetAIProvider(ctx context.Context) (resp []*schema.Get
 
 	_ = json.Unmarshal([]byte(aiProviderConfig), &resp)
 	return resp, nil
-}
-
-func (s *SiteInfoService) GetAIModels(ctx context.Context, req *schema.GetAIModelsReq) (resp []*schema.GetAIModelResp, err error) {
-	resp = make([]*schema.GetAIModelResp, 0)
-	if req.APIKey != "" && isAllMask(req.APIKey) {
-		storedKey, err := s.getStoredAIKey(ctx, req.APIHost)
-		if err != nil {
-			return resp, err
-		}
-		if storedKey == "" {
-			return resp, errors.BadRequest("api_key is required")
-		}
-		req.APIKey = storedKey
-	}
-
-	r := resty.New()
-	r.SetHeader("Authorization", fmt.Sprintf("Bearer %s", req.APIKey))
-	r.SetHeader("Content-Type", "application/json")
-	respBody, err := r.R().Get(req.APIHost + "/v1/models")
-	if err != nil {
-		log.Error(err)
-		return resp, errors.BadRequest(fmt.Sprintf("failed to get AI models %s", err.Error()))
-	}
-	if !respBody.IsSuccess() {
-		log.Error(fmt.Sprintf("failed to get AI models, status code: %d, body: %s", respBody.StatusCode(), respBody.String()))
-		return resp, errors.BadRequest(fmt.Sprintf("failed to get AI models, response: %s", respBody.String()))
-	}
-
-	data := schema.GetAIModelsResp{}
-	_ = json.Unmarshal(respBody.Body(), &data)
-
-	for _, model := range data.Data {
-		resp = append(resp, &schema.GetAIModelResp{
-			Id:      model.Id,
-			Object:  model.Object,
-			Created: model.Created,
-			OwnedBy: model.OwnedBy,
-		})
-	}
-	return resp, nil
-}
-
-func (s *SiteInfoService) getStoredAIKey(ctx context.Context, apiHost string) (string, error) {
-	current, err := s.siteInfoCommonService.GetSiteAI(ctx)
-	if err != nil {
-		return "", err
-	}
-	apiHost = strings.TrimRight(apiHost, "/")
-	for _, provider := range current.SiteAIProviders {
-		if strings.TrimRight(provider.APIHost, "/") == apiHost && provider.APIKey != "" {
-			return provider.APIKey, nil
-		}
-	}
-	if current.ChosenProvider != "" {
-		for _, provider := range current.SiteAIProviders {
-			if provider.Provider == current.ChosenProvider {
-				return provider.APIKey, nil
-			}
-		}
-	}
-	return "", nil
 }

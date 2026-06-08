@@ -3,9 +3,11 @@ package controller
 import (
 	"github.com/apache/answer/internal/base/handler"
 	"github.com/apache/answer/internal/base/middleware"
+	"github.com/apache/answer/internal/base/reason"
 	"github.com/apache/answer/internal/schema"
 	"github.com/apache/answer/internal/service/task_square"
 	"github.com/gin-gonic/gin"
+	"github.com/segmentfault/pacman/errors"
 )
 
 type TaskSquareController struct {
@@ -34,8 +36,53 @@ func (ctrl *TaskSquareController) ListTasks(ctx *gin.Context) {
 	}
 	req.UserID = middleware.GetLoginUserIDFromContext(ctx)
 	req.IsAdmin = false
+	req.IsAdminModerator = middleware.GetUserIsAdminModerator(ctx)
 	resp, err := ctrl.taskSquareService.ListTasks(ctx, req)
 	handler.HandleResponse(ctx, err, resp)
+}
+
+func (ctrl *TaskSquareController) ListReviewTasks(ctx *gin.Context) {
+	if !middleware.GetUserIsAdminModerator(ctx) {
+		handler.HandleResponse(ctx, errors.Forbidden(reason.ForbiddenError), nil)
+		return
+	}
+	req := &schema.TaskListReq{}
+	if handler.BindAndCheck(ctx, req) {
+		return
+	}
+	req.UserID = middleware.GetLoginUserIDFromContext(ctx)
+	req.IsAdmin = true
+	req.IsAdminModerator = true
+	resp, err := ctrl.taskSquareService.ListTasks(ctx, req)
+	handler.HandleResponse(ctx, err, resp)
+}
+
+func (ctrl *TaskSquareController) ReviewTask(ctx *gin.Context) {
+	if !middleware.GetUserIsAdminModerator(ctx) {
+		handler.HandleResponse(ctx, errors.Forbidden(reason.ForbiddenError), nil)
+		return
+	}
+	req := &schema.TaskReviewReq{}
+	if handler.BindAndCheck(ctx, req) {
+		return
+	}
+	req.OperatorID = middleware.GetLoginUserIDFromContext(ctx)
+	err := ctrl.taskSquareService.ReviewTask(ctx, req)
+	handler.HandleResponse(ctx, err, nil)
+}
+
+func (ctrl *TaskSquareController) ReviewSubmission(ctx *gin.Context) {
+	if !middleware.GetUserIsAdminModerator(ctx) {
+		handler.HandleResponse(ctx, errors.Forbidden(reason.ForbiddenError), nil)
+		return
+	}
+	req := &schema.TaskSubmissionReviewReq{}
+	if handler.BindAndCheck(ctx, req) {
+		return
+	}
+	req.OperatorID = middleware.GetLoginUserIDFromContext(ctx)
+	err := ctrl.taskSquareService.ReviewSubmission(ctx, req)
+	handler.HandleResponse(ctx, err, nil)
 }
 
 func (ctrl *TaskSquareController) GetTask(ctx *gin.Context) {
@@ -71,6 +118,16 @@ func (ctrl *TaskSquareController) SubmitTask(ctx *gin.Context) {
 
 func (ctrl *TaskSquareController) GetPointAccount(ctx *gin.Context) {
 	resp, err := ctrl.taskSquareService.GetPointAccount(ctx, middleware.GetLoginUserIDFromContext(ctx))
+	handler.HandleResponse(ctx, err, resp)
+}
+
+func (ctrl *TaskSquareController) ListPointRanking(ctx *gin.Context) {
+	resp, err := ctrl.taskSquareService.ListPointRanking(ctx)
+	handler.HandleResponse(ctx, err, resp)
+}
+
+func (ctrl *TaskSquareController) ListContributionRanking(ctx *gin.Context) {
+	resp, err := ctrl.taskSquareService.ListContributionRanking(ctx)
 	handler.HandleResponse(ctx, err, resp)
 }
 

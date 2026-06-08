@@ -106,15 +106,6 @@ export const ADMIN_NAV_MENUS = [
     ],
   },
   {
-    name: 'intelligence',
-    icon: 'robot',
-    children: [
-      { name: 'ai_settings', path: 'ai-settings' },
-      { name: 'ai_assistant', path: 'ai-assistant' },
-      { name: 'mcp' },
-    ],
-  },
-  {
     name: 'ai_chat_config',
     path: 'ai-chat-config',
     icon: 'chat-square-text-fill',

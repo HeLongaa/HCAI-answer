@@ -140,21 +140,33 @@ const Header: FC = () => {
     /^\/users\/[^/]+(\/(answers|questions|bookmarks|reputation|badges|votes))?$/.test(
       location.pathname,
     );
+  const isQuestionSideNavPage =
+    location.pathname.startsWith('/questions') ||
+    location.pathname.startsWith('/linked') ||
+    location.pathname.startsWith('/posts/');
   const isTaskPage = location.pathname.startsWith('/tasks');
   const isCommunityPage =
-    location.pathname.startsWith('/questions') ||
+    isQuestionSideNavPage ||
+    location.pathname.startsWith('/search') ||
     location.pathname.startsWith('/tags') ||
     isUserSideNavPage ||
+    location.pathname.startsWith('/leaderboard') ||
     location.pathname.startsWith('/badges') ||
     location.pathname.startsWith('/review');
   const isSubscriptionPage = location.pathname === '/subscription';
   const isChatPage = location.pathname === '/';
+  const isLegalSideNavPage =
+    location.pathname === '/tos' || location.pathname === '/privacy';
+  const isAiAssistantSideNavPage =
+    location.pathname.startsWith('/ai-assistant');
   const showAiSubscriptionPill = isChatPage || isSubscriptionPage;
   const isSideNavPage =
     isChatPage ||
     isSubscriptionPage ||
     isTaskPage ||
     isCommunityPage ||
+    isLegalSideNavPage ||
+    isAiAssistantSideNavPage ||
     location.pathname.startsWith('/admin');
   const isAuthFlowPage =
     location.pathname === '/users/login' ||

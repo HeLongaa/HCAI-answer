@@ -27,45 +27,44 @@ import (
 )
 
 type AnswerAPIRouter struct {
-	langController                *controller.LangController
-	userController                *controller.UserController
-	commentController             *controller.CommentController
-	reportController              *controller.ReportController
-	voteController                *controller.VoteController
-	tagController                 *controller.TagController
-	followController              *controller.FollowController
-	collectionController          *controller.CollectionController
-	questionController            *controller.QuestionController
-	answerController              *controller.AnswerController
-	searchController              *controller.SearchController
-	revisionController            *controller.RevisionController
-	rankController                *controller.RankController
-	adminUserController           *controller_admin.UserAdminController
-	reasonController              *controller.ReasonController
-	themeController               *controller_admin.ThemeController
-	adminSiteInfoController       *controller_admin.SiteInfoController
-	siteInfoController            *controller.SiteInfoController
-	notificationController        *controller.NotificationController
-	dashboardController           *controller.DashboardController
-	uploadController              *controller.UploadController
-	activityController            *controller.ActivityController
-	roleController                *controller_admin.RoleController
-	pluginController              *controller_admin.PluginController
-	permissionController          *controller.PermissionController
-	userPluginController          *controller.UserPluginController
-	reviewController              *controller.ReviewController
-	metaController                *controller.MetaController
-	badgeController               *controller.BadgeController
-	adminBadgeController          *controller_admin.BadgeController
-	apiKeyController              *controller_admin.AdminAPIKeyController
-	aiChatConfigController        *controller_admin.AIChatConfigController
-	aiController                  *controller.AIController
-	aiConversationController      *controller.AIConversationController
-	aiConversationAdminController *controller_admin.AIConversationAdminController
-	mcpController                 *controller.MCPController
-	taskSquareController          *controller.TaskSquareController
-	taskSquareAdminController     *controller_admin.TaskSquareAdminController
-	realtimeController            *controller.RealtimeController
+	langController            *controller.LangController
+	userController            *controller.UserController
+	commentController         *controller.CommentController
+	reportController          *controller.ReportController
+	voteController            *controller.VoteController
+	tagController             *controller.TagController
+	followController          *controller.FollowController
+	collectionController      *controller.CollectionController
+	questionController        *controller.QuestionController
+	answerController          *controller.AnswerController
+	searchController          *controller.SearchController
+	revisionController        *controller.RevisionController
+	rankController            *controller.RankController
+	adminUserController       *controller_admin.UserAdminController
+	reasonController          *controller.ReasonController
+	themeController           *controller_admin.ThemeController
+	adminSiteInfoController   *controller_admin.SiteInfoController
+	siteInfoController        *controller.SiteInfoController
+	notificationController    *controller.NotificationController
+	dashboardController       *controller.DashboardController
+	uploadController          *controller.UploadController
+	activityController        *controller.ActivityController
+	roleController            *controller_admin.RoleController
+	pluginController          *controller_admin.PluginController
+	permissionController      *controller.PermissionController
+	userPluginController      *controller.UserPluginController
+	reviewController          *controller.ReviewController
+	metaController            *controller.MetaController
+	badgeController           *controller.BadgeController
+	adminBadgeController      *controller_admin.BadgeController
+	apiKeyController          *controller_admin.AdminAPIKeyController
+	aiChatConfigController    *controller_admin.AIChatConfigController
+	aiController              *controller.AIController
+	aiConversationController  *controller.AIConversationController
+	mcpController             *controller.MCPController
+	taskSquareController      *controller.TaskSquareController
+	taskSquareAdminController *controller_admin.TaskSquareAdminController
+	realtimeController        *controller.RealtimeController
 }
 
 func NewAnswerAPIRouter(
@@ -103,52 +102,50 @@ func NewAnswerAPIRouter(
 	aiChatConfigController *controller_admin.AIChatConfigController,
 	aiController *controller.AIController,
 	aiConversationController *controller.AIConversationController,
-	aiConversationAdminController *controller_admin.AIConversationAdminController,
 	mcpController *controller.MCPController,
 	taskSquareController *controller.TaskSquareController,
 	taskSquareAdminController *controller_admin.TaskSquareAdminController,
 	realtimeController *controller.RealtimeController,
 ) *AnswerAPIRouter {
 	return &AnswerAPIRouter{
-		langController:                langController,
-		userController:                userController,
-		commentController:             commentController,
-		reportController:              reportController,
-		voteController:                voteController,
-		tagController:                 tagController,
-		followController:              followController,
-		collectionController:          collectionController,
-		questionController:            questionController,
-		answerController:              answerController,
-		searchController:              searchController,
-		revisionController:            revisionController,
-		rankController:                rankController,
-		adminUserController:           adminUserController,
-		reasonController:              reasonController,
-		themeController:               themeController,
-		adminSiteInfoController:       adminSiteInfoController,
-		notificationController:        notificationController,
-		siteInfoController:            siteInfoController,
-		dashboardController:           dashboardController,
-		uploadController:              uploadController,
-		activityController:            activityController,
-		roleController:                roleController,
-		pluginController:              pluginController,
-		permissionController:          permissionController,
-		userPluginController:          userPluginController,
-		reviewController:              reviewController,
-		metaController:                metaController,
-		badgeController:               badgeController,
-		adminBadgeController:          adminBadgeController,
-		apiKeyController:              apiKeyController,
-		aiChatConfigController:        aiChatConfigController,
-		aiController:                  aiController,
-		aiConversationController:      aiConversationController,
-		aiConversationAdminController: aiConversationAdminController,
-		mcpController:                 mcpController,
-		taskSquareController:          taskSquareController,
-		taskSquareAdminController:     taskSquareAdminController,
-		realtimeController:            realtimeController,
+		langController:            langController,
+		userController:            userController,
+		commentController:         commentController,
+		reportController:          reportController,
+		voteController:            voteController,
+		tagController:             tagController,
+		followController:          followController,
+		collectionController:      collectionController,
+		questionController:        questionController,
+		answerController:          answerController,
+		searchController:          searchController,
+		revisionController:        revisionController,
+		rankController:            rankController,
+		adminUserController:       adminUserController,
+		reasonController:          reasonController,
+		themeController:           themeController,
+		adminSiteInfoController:   adminSiteInfoController,
+		notificationController:    notificationController,
+		siteInfoController:        siteInfoController,
+		dashboardController:       dashboardController,
+		uploadController:          uploadController,
+		activityController:        activityController,
+		roleController:            roleController,
+		pluginController:          pluginController,
+		permissionController:      permissionController,
+		userPluginController:      userPluginController,
+		reviewController:          reviewController,
+		metaController:            metaController,
+		badgeController:           badgeController,
+		adminBadgeController:      adminBadgeController,
+		apiKeyController:          apiKeyController,
+		aiChatConfigController:    aiChatConfigController,
+		aiController:              aiController,
+		aiConversationController:  aiConversationController,
+		mcpController:             mcpController,
+		taskSquareController:      taskSquareController,
+		taskSquareAdminController: taskSquareAdminController,
+		realtimeController:        realtimeController,
 	}
 }
 
@@ -367,7 +364,12 @@ func (a *AnswerAPIRouter) RegisterAnswerAPIRouter(r *gin.RouterGroup) {
 	r.POST("/task", a.taskSquareController.CreateTask)
 	r.POST("/task/claim", a.taskSquareController.ClaimTask)
 	r.POST("/task/submission", a.taskSquareController.SubmitTask)
+	r.GET("/review/tasks", a.taskSquareController.ListReviewTasks)
+	r.PUT("/review/task", a.taskSquareController.ReviewTask)
+	r.PUT("/review/task/submission", a.taskSquareController.ReviewSubmission)
 	r.GET("/points/account", a.taskSquareController.GetPointAccount)
+	r.GET("/points/ranking", a.taskSquareController.ListPointRanking)
+	r.GET("/contribution/ranking", a.taskSquareController.ListContributionRanking)
 	r.GET("/points/transactions", a.taskSquareController.ListPointTransactions)
 
 	// AI conversation
@@ -510,21 +512,6 @@ func (a *AnswerAPIRouter) RegisterAnswerAdminAPIRouter(r *gin.RouterGroup) {
 	r.DELETE("/ai-chat/video-models/:id", a.aiChatConfigController.DeleteVideoModel)
 	r.GET("/ai-chat/video-setting", a.aiChatConfigController.GetVideoSetting)
 	r.PUT("/ai-chat/video-setting", a.aiChatConfigController.SaveVideoSetting)
-
-	// ai config
-	r.GET("/ai-config", a.adminSiteInfoController.GetAIConfig)
-	r.PUT("/ai-config", a.adminSiteInfoController.UpdateAIConfig)
-	r.GET("/ai-provider", a.adminSiteInfoController.GetAIProvider)
-	r.POST("/ai-models", a.adminSiteInfoController.RequestAIModels)
-
-	// mcp config
-	r.GET("/mcp-config", a.adminSiteInfoController.GetMCPConfig)
-	r.PUT("/mcp-config", a.adminSiteInfoController.UpdateMCPConfig)
-
-	// AI conversation management
-	r.GET("/ai/conversation/page", a.aiConversationAdminController.GetConversationList)
-	r.GET("/ai/conversation", a.aiConversationAdminController.GetConversationDetail)
-	r.DELETE("/ai/conversation", a.aiConversationAdminController.DeleteConversation)
 
 	// task square
 	r.GET("/tasks", a.taskSquareAdminController.ListTasks)

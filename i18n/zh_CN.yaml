@@ -1807,11 +1807,7 @@ ui:
     security: 安全
     files: 文件
     apikeys: API 密钥
-    intelligence: 智力
-    ai_assistant: AI 助手
-    ai_settings: AI 设置
     ai_chat_config: AI-CHAT配置
-    mcp: MCP
   website_welcome: 欢迎来到 {{site_name}}
   user_center:
     login: 登录
@@ -2313,47 +2309,6 @@ ui:
       delete_modal:
         title: 删除API密钥
         content: 任何使用此密钥的应用程序或脚本都将无法访问API。这是永久性的！
-    ai_settings:
-      enabled:
-        label: AI 已启用
-        check: 启用AI功能
-        text: AI 模型必须正确配置才能使用。
-      provider:
-        label: 提供商
-      api_host:
-        label: API 主机
-        msg: API 主机是必需的
-      api_key:
-        label: API 密钥
-        check: 检查
-        check_success: "连接成功。"
-        msg: API 密钥是必填项
-      model:
-        label: 模型
-        msg: 模型是必需的
-      add_success: AI 设置更新成功。
-    conversations:
-      topic: 主题
-      helpful: 有帮助
-      unhelpful: 没有帮助
-      created: 创建于
-      action: 操作
-      empty: 没有找到会话
-      delete_modal:
-        title: 删除对话
-        content: 您确定要删除此对话吗？这是永久性的！
-        delete_success: 对话删除成功。
-    mcp:
-      mcp_server:
-        label: MCP服务器
-        switch: 已启用
-      type:
-        label: 类型
-      url:
-        label: 链接
-      http_header:
-        label: HTTP Header
-        text: 请将 {key} 替换为 API 密钥。
   form:
     optional: (选填)
     empty: 不能为空
@@ -2362,7 +2317,7 @@ ui:
     not_found_props: "所需属性 {{ key }} 未找到。"
     select: 选择
   page_review:
-    review: 评论
+    review: 审核中心
     proposed: 提案
     question_edit: 话题编辑
     answer_edit: 回答编辑

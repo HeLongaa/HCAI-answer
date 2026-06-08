@@ -1,11 +1,16 @@
 package schema
 
 type TaskCreateReq struct {
-	Title            string   `validate:"required,min=2,max=150" json:"title"`
-	Description      string   `validate:"required,min=2" json:"description"`
-	Attachments      []string `json:"attachments"`
-	UserID           string   `json:"-"`
-	IsAdminModerator bool     `json:"-"`
+	Title                  string   `validate:"required,min=2,max=150" json:"title"`
+	Description            string   `validate:"required,min=2" json:"description"`
+	Tags                   []string `json:"tags"`
+	RewardPoints           int      `validate:"min=0" json:"reward_points"`
+	Deadline               int64    `json:"deadline"`
+	SubmissionRequirements string   `json:"submission_requirements"`
+	Attachments            []string `json:"attachments"`
+	ReviewComment          string   `json:"review_comment"`
+	UserID                 string   `json:"-"`
+	IsAdminModerator       bool     `json:"-"`
 }
 
 type TaskReviewReq struct {
@@ -50,12 +55,13 @@ type TaskSubmissionReviewReq struct {
 }
 
 type TaskListReq struct {
-	Page     int    `form:"page"`
-	PageSize int    `form:"page_size"`
-	Status   string `form:"status"`
-	Mine     bool   `form:"mine"`
-	UserID   string `json:"-"`
-	IsAdmin  bool   `json:"-"`
+	Page             int    `form:"page"`
+	PageSize         int    `form:"page_size"`
+	Status           string `form:"status"`
+	Mine             bool   `form:"mine"`
+	UserID           string `json:"-"`
+	IsAdmin          bool   `json:"-"`
+	IsAdminModerator bool   `json:"-"`
 }
 
 type TaskResp struct {
@@ -78,6 +84,7 @@ type TaskResp struct {
 	ReviewComment          string              `json:"review_comment"`
 	ClaimedAt              int64               `json:"claimed_at"`
 	CompletedAt            int64               `json:"completed_at"`
+	CanViewPrivateFields   bool                `json:"can_view_private_fields"`
 	Submission             *TaskSubmissionResp `json:"submission,omitempty"`
 }
 
@@ -97,6 +104,14 @@ type TaskSubmissionResp struct {
 
 type PointAccountResp struct {
 	Balance int `json:"balance"`
+}
+
+type PointRankingResp struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Avatar      string `json:"avatar"`
+	Balance     int    `json:"balance"`
 }
 
 type PointTransactionReq struct {

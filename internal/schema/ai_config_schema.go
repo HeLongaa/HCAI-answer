@@ -36,16 +36,3 @@ type GetAIModelsResp struct {
 		OwnedBy string `json:"owned_by"`
 	} `json:"data"`
 }
-
-type GetAIModelsReq struct {
-	APIHost string `json:"api_host"`
-	APIKey  string `json:"api_key"`
-}
-
-// GetAIModelResp get AI model response
-type GetAIModelResp struct {
-	Id      string `json:"id"`
-	Object  string `json:"object"`
-	Created int    `json:"created"`
-	OwnedBy string `json:"owned_by"`
-}

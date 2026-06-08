@@ -23,6 +23,7 @@ import EditPostModal from './EditPostModal';
 import SuggestContent from './SuggestContent';
 import FlagContent from './FlagContent';
 import QueuedContent from './QueuedContent';
+import TaskContent from './TaskContent';
 
 export {
   ReviewType,
@@ -31,4 +32,5 @@ export {
   FlagContent,
   SuggestContent,
   QueuedContent,
+  TaskContent,
 };
