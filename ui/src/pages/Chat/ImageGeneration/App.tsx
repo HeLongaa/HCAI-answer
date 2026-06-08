@@ -47,6 +47,13 @@ export default function App({ embedded = false }: AppProps) {
     (s) => s.loadSystemImageGenerations,
   );
   const appMode = useStore((s) => s.appMode);
+  const hasRunningGalleryTasks = useStore((s) =>
+    s.tasks.some(
+      (task) =>
+        (task.sourceMode ?? 'gallery') === 'gallery' &&
+        task.status === 'running',
+    ),
+  );
   const filterFavorite = useStore((s) => s.filterFavorite);
   const activeFavoriteCollectionId = useStore(
     (s) => s.activeFavoriteCollectionId,
@@ -98,6 +105,27 @@ export default function App({ embedded = false }: AppProps) {
       cancelled = true;
     };
   }, [loadSystemImageGenerations, loadSystemImageModels, setSettings]);
+
+  useEffect(() => {
+    if (!hasRunningGalleryTasks) return;
+
+    let cancelled = false;
+    const refreshGenerations = () => {
+      if (cancelled || document.visibilityState === 'hidden') return;
+      void loadSystemImageGenerations();
+    };
+
+    const intervalId = window.setInterval(refreshGenerations, 3000);
+    window.addEventListener('focus', refreshGenerations);
+    document.addEventListener('visibilitychange', refreshGenerations);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshGenerations);
+      document.removeEventListener('visibilitychange', refreshGenerations);
+    };
+  }, [hasRunningGalleryTasks, loadSystemImageGenerations]);
 
   useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {

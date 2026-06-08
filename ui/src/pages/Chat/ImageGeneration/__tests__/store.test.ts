@@ -306,6 +306,28 @@ describe('mask draft lifecycle in store actions', () => {
     expect(body.partial_images).toBe(1)
   })
 
+  it('ignores streaming heartbeat events for gallery streaming requests', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      [
+        ': keep-alive',
+        '',
+        'data: {"type":"ping"}',
+        '',
+        'data: {"type":"image_generation.completed","b64_json":"final-image"}',
+        '',
+      ].join('\n'),
+      { status: 200 },
+    ))
+
+    await submitTask()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(useStore.getState().tasks[0].status).toBe('done'))
+
+    const state = useStore.getState()
+    expect(state.tasks[0].status).toBe('done')
+    expect(state.tasks[0].outputImages).toHaveLength(1)
+  })
+
   it('preserves selected image mentions when replacing a mask target with an equivalent image id', () => {
     const replacement = { id: 'image-a-replacement', dataUrl: imageA.dataUrl }
     const prompt = `参考 ${getSelectedImageMentionLabel(0)} 生成`
@@ -366,35 +388,41 @@ describe('input persistence setting', () => {
     })
   })
 
-  it('persists input when restart input restore is enabled', () => {
+  it('omits input by default', () => {
     const persisted = getPersistedState(useStore.getState())
 
-    expect(persisted.prompt).toBe('prompt')
-    expect(persisted.inputImages).toEqual([{ id: imageA.id, dataUrl: '' }])
+    expect(persisted).not.toHaveProperty('prompt')
+    expect(persisted).not.toHaveProperty('inputImages')
+    expect(persisted.galleryInputDraft).toBeNull()
   })
 
-  it('omits input when restart input restore is disabled', () => {
-    useStore.setState({ settings: { ...DEFAULT_SETTINGS, persistInputOnRestart: false } })
+  it('ignores stale restart input restore settings', () => {
+    useStore.setState({ settings: { ...DEFAULT_SETTINGS, persistInputOnRestart: true } })
 
     const persisted = getPersistedState(useStore.getState())
 
     expect(persisted).not.toHaveProperty('prompt')
     expect(persisted).not.toHaveProperty('inputImages')
+    expect(persisted.galleryInputDraft).toBeNull()
   })
 
-  it('writes empty input when persisted input is cleared', () => {
+  it('does not write empty input when input is cleared', () => {
     useStore.setState({ prompt: '', inputImages: [] })
 
     const persisted = getPersistedState(useStore.getState())
 
-    expect(persisted.prompt).toBe('')
-    expect(persisted.inputImages).toEqual([])
+    expect(persisted).not.toHaveProperty('prompt')
+    expect(persisted).not.toHaveProperty('inputImages')
+    expect(persisted.galleryInputDraft).toBeNull()
   })
 })
 
 describe('agent conversation persistence', () => {
   beforeEach(async () => {
     await clearAgentConversations()
+    await clearTasks()
+    await clearImages()
+    useStore.setState({ tasks: [], inputImages: [], agentConversations: [] })
   })
 
   it('omits agent conversations from localStorage state', () => {
@@ -449,7 +477,7 @@ describe('agent conversation persistence', () => {
     expect(stored).toEqual([])
   })
 
-  it('does not restore legacy local task payloads during startup', async () => {
+  it('restores local gallery tasks during startup without large payloads', async () => {
     await putDbTask(task({
       id: 'legacy-task',
       outputImages: ['image-live'],
@@ -460,7 +488,13 @@ describe('agent conversation persistence', () => {
 
     await initStore()
 
-    expect(useStore.getState().tasks).toEqual([])
+    const tasks = useStore.getState().tasks
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]).toMatchObject({
+      id: 'legacy-task',
+      outputImages: ['image-live'],
+    })
+    expect(tasks[0].rawResponsePayload).not.toContain('legacy-task-base64')
   })
 
   it('keeps agent conversations created while initStore is loading', async () => {
@@ -839,7 +873,7 @@ describe('agent draft lifecycle', () => {
     expect(state.inputImages).toEqual([imageB])
   })
 
-  it('persists the gallery draft while agent mode is active', () => {
+  it('omits the gallery draft while agent mode is active', () => {
     const galleryPrompt = 'gallery draft'
     useStore.setState({
       appMode: 'agent',
@@ -853,8 +887,9 @@ describe('agent draft lifecycle', () => {
 
     const persisted = getPersistedState(useStore.getState())
 
-    expect(persisted.prompt).toBe(galleryPrompt)
-    expect(persisted.inputImages).toEqual([{ id: imageB.id, dataUrl: '' }])
+    expect(persisted).not.toHaveProperty('prompt')
+    expect(persisted).not.toHaveProperty('inputImages')
+    expect(persisted.galleryInputDraft).toBeNull()
   })
 
   it('clears stale mentions in the visible input when switching conversations', () => {

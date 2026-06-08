@@ -210,6 +210,8 @@ export interface TaskRecord {
   outputImages: string[];
   /** 流式生成的中间步骤图片 id 列表，仅失败时保留供排查/下载 */
   streamPartialImageIds?: string[];
+  /** 后端保存的流式中间步骤图片 URL，用于刷新/切换后恢复预览 */
+  streamPartialImageUrls?: string[];
   /** API 返回的原始图片 HTTP URL（非 base64 时记录） */
   rawImageUrls?: string[];
   /** 后端系统生图记录 ID，用于刷新历史和同步删除 */

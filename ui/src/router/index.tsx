@@ -48,7 +48,13 @@ const routeWrapper = (routeNodes: RouteNode[], root: RouteNode[]) => {
 
       if (typeof rn.page === 'string') {
         const pagePath = rn.page.replace('pages/', '');
-        Ctrl = lazy(() => import(`@/pages/${pagePath}`));
+        Ctrl = lazy(
+          () =>
+            import(
+              /* webpackExclude: /(__tests__|\.test\.)/ */
+              `@/pages/${pagePath}`
+            ),
+        );
       } else {
         Ctrl = rn.page;
       }

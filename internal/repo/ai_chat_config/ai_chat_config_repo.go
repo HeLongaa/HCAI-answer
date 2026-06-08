@@ -429,6 +429,9 @@ func (r *aiChatConfigRepo) ReserveChatUsage(ctx context.Context, log *entity.AIC
 	if log == nil {
 		return nil
 	}
+	if err := r.ensureChatUsageLogSchema(ctx); err != nil {
+		return err
+	}
 	if log.Status == "" {
 		log.Status = "reserved"
 	}
@@ -459,6 +462,9 @@ func (r *aiChatConfigRepo) ReserveChatUsage(ctx context.Context, log *entity.AIC
 }
 
 func (r *aiChatConfigRepo) CompleteChatUsage(ctx context.Context, chatCompletionID string) error {
+	if err := r.ensureChatUsageLogSchema(ctx); err != nil {
+		return err
+	}
 	_, err := r.data.DB.Context(ctx).
 		Where("chat_completion_id = ?", chatCompletionID).
 		Cols("status").
@@ -467,6 +473,9 @@ func (r *aiChatConfigRepo) CompleteChatUsage(ctx context.Context, chatCompletion
 }
 
 func (r *aiChatConfigRepo) ReleaseChatUsage(ctx context.Context, chatCompletionID string) error {
+	if err := r.ensureChatUsageLogSchema(ctx); err != nil {
+		return err
+	}
 	_, err := r.data.DB.Context(ctx).
 		Where("chat_completion_id = ?", chatCompletionID).
 		Cols("status").
@@ -475,6 +484,9 @@ func (r *aiChatConfigRepo) ReleaseChatUsage(ctx context.Context, chatCompletionI
 }
 
 func (r *aiChatConfigRepo) SumUserChatUsage(ctx context.Context, userID string, startAt, endAt any) (float64, error) {
+	if err := r.ensureChatUsageLogSchema(ctx); err != nil {
+		return 0, err
+	}
 	var total struct {
 		ConsumePoints float64 `xorm:"consume_points"`
 	}
@@ -490,6 +502,26 @@ func (r *aiChatConfigRepo) SumUserChatUsage(ctx context.Context, userID string, 
 		return 0, err
 	}
 	return total.ConsumePoints, nil
+}
+
+func (r *aiChatConfigRepo) ensureChatUsageLogSchema(ctx context.Context) error {
+	if err := r.data.DB.Context(ctx).Sync(new(entity.AIChatUsageLog)); err != nil {
+		return err
+	}
+	switch r.data.DB.Dialect().URI().DBType {
+	case schemas.MYSQL:
+		return r.ensureColumns(ctx, "ai_chat_usage_logs", map[string]string{
+			"status": "VARCHAR(50) NOT NULL DEFAULT 'completed'",
+		})
+	case schemas.POSTGRES:
+		return r.ensureColumns(ctx, "ai_chat_usage_logs", map[string]string{
+			"status": "VARCHAR(50) NOT NULL DEFAULT 'completed'",
+		})
+	default:
+		return r.ensureColumns(ctx, "ai_chat_usage_logs", map[string]string{
+			"status": "TEXT NOT NULL DEFAULT 'completed'",
+		})
+	}
 }
 
 func (r *aiChatConfigRepo) EnsureImageTables(ctx context.Context) error {
@@ -562,39 +594,42 @@ func (r *aiChatConfigRepo) ensureImageGenerationColumns(ctx context.Context) err
 	switch r.data.DB.Dialect().URI().DBType {
 	case schemas.MYSQL:
 		return r.ensureColumns(ctx, "ai_image_generations", map[string]string{
-			"output_format":    "VARCHAR(50) NOT NULL DEFAULT ''",
-			"compression":      "INT(11) NOT NULL DEFAULT 0",
-			"moderation":       "VARCHAR(50) NOT NULL DEFAULT ''",
-			"background":       "VARCHAR(50) NOT NULL DEFAULT ''",
-			"reference_images": "TEXT NULL",
-			"mask_image":       "TEXT NULL",
-			"api_mode":         "VARCHAR(50) NOT NULL DEFAULT ''",
-			"response_id":      "VARCHAR(255) NOT NULL DEFAULT ''",
-			"response_output":  "TEXT NULL",
+			"output_format":      "VARCHAR(50) NOT NULL DEFAULT ''",
+			"compression":        "INT(11) NOT NULL DEFAULT 0",
+			"moderation":         "VARCHAR(50) NOT NULL DEFAULT ''",
+			"background":         "VARCHAR(50) NOT NULL DEFAULT ''",
+			"reference_images":   "TEXT NULL",
+			"mask_image":         "TEXT NULL",
+			"api_mode":           "VARCHAR(50) NOT NULL DEFAULT ''",
+			"response_id":        "VARCHAR(255) NOT NULL DEFAULT ''",
+			"response_output":    "TEXT NULL",
+			"partial_image_urls": "TEXT NULL",
 		})
 	case schemas.POSTGRES:
 		return r.ensureColumns(ctx, "ai_image_generations", map[string]string{
-			"output_format":    "VARCHAR(50) NOT NULL DEFAULT ''",
-			"compression":      "INTEGER NOT NULL DEFAULT 0",
-			"moderation":       "VARCHAR(50) NOT NULL DEFAULT ''",
-			"background":       "VARCHAR(50) NOT NULL DEFAULT ''",
-			"reference_images": "TEXT NOT NULL DEFAULT ''",
-			"mask_image":       "TEXT NOT NULL DEFAULT ''",
-			"api_mode":         "VARCHAR(50) NOT NULL DEFAULT ''",
-			"response_id":      "VARCHAR(255) NOT NULL DEFAULT ''",
-			"response_output":  "TEXT NOT NULL DEFAULT ''",
+			"output_format":      "VARCHAR(50) NOT NULL DEFAULT ''",
+			"compression":        "INTEGER NOT NULL DEFAULT 0",
+			"moderation":         "VARCHAR(50) NOT NULL DEFAULT ''",
+			"background":         "VARCHAR(50) NOT NULL DEFAULT ''",
+			"reference_images":   "TEXT NOT NULL DEFAULT ''",
+			"mask_image":         "TEXT NOT NULL DEFAULT ''",
+			"api_mode":           "VARCHAR(50) NOT NULL DEFAULT ''",
+			"response_id":        "VARCHAR(255) NOT NULL DEFAULT ''",
+			"response_output":    "TEXT NOT NULL DEFAULT ''",
+			"partial_image_urls": "TEXT NOT NULL DEFAULT ''",
 		})
 	default:
 		return r.ensureColumns(ctx, "ai_image_generations", map[string]string{
-			"output_format":    "TEXT NOT NULL DEFAULT ''",
-			"compression":      "INTEGER NOT NULL DEFAULT 0",
-			"moderation":       "TEXT NOT NULL DEFAULT ''",
-			"background":       "TEXT NOT NULL DEFAULT ''",
-			"reference_images": "TEXT NOT NULL DEFAULT ''",
-			"mask_image":       "TEXT NOT NULL DEFAULT ''",
-			"api_mode":         "TEXT NOT NULL DEFAULT ''",
-			"response_id":      "TEXT NOT NULL DEFAULT ''",
-			"response_output":  "TEXT NOT NULL DEFAULT ''",
+			"output_format":      "TEXT NOT NULL DEFAULT ''",
+			"compression":        "INTEGER NOT NULL DEFAULT 0",
+			"moderation":         "TEXT NOT NULL DEFAULT ''",
+			"background":         "TEXT NOT NULL DEFAULT ''",
+			"reference_images":   "TEXT NOT NULL DEFAULT ''",
+			"mask_image":         "TEXT NOT NULL DEFAULT ''",
+			"api_mode":           "TEXT NOT NULL DEFAULT ''",
+			"response_id":        "TEXT NOT NULL DEFAULT ''",
+			"response_output":    "TEXT NOT NULL DEFAULT ''",
+			"partial_image_urls": "TEXT NOT NULL DEFAULT ''",
 		})
 	}
 }

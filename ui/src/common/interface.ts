@@ -1112,6 +1112,7 @@ export interface AiImageGeneration {
   response_output?: string;
   count: number;
   image_urls: string[];
+  partial_image_urls?: string[];
   status: string;
   error: string;
   expires_at: number;

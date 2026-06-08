@@ -45,7 +45,7 @@ function TaskActionButton({
       <button
         type="button"
         onClick={onClick}
-        className={className}
+        className={`hcai-task-action-button ${className}`}
         disabled={disabled}
         aria-label={tooltip}>
         {children}
@@ -76,9 +76,12 @@ export default function TaskCard({
   const [swipeDirection, setSwipeDirection] = useState<-1 | 0 | 1>(0);
   const [streamPreviewLoaded, setStreamPreviewLoaded] = useState(false);
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection);
-  const settings = useStore((s) => s.settings);
   const openFavoritePicker = useStore((s) => s.openFavoritePicker);
-  const streamPreviewSrc = useStore((s) => s.streamPreviews[task.id] || '');
+  const persistedStreamPreviewSrc =
+    task.streamPartialImageUrls?.filter(Boolean).slice(-1)[0] || '';
+  const streamPreviewSrc = useStore((s) => s.streamPreviews[task.id] || '') || persistedStreamPreviewSrc;
+  const isWaitingForStreamPreview =
+    task.status === 'running' && (task.streamPartialImages || 0) > 0;
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const swipeResetTimerRef = useRef<number | null>(null);
   const suppressClickUntilRef = useRef(0);
@@ -334,6 +337,14 @@ export default function TaskCard({
     task.status === 'error' && task.customRecoverable;
   const showRunningTimer =
     task.status === 'running' || isFalReconnecting || isCustomReconnecting;
+  const fallbackCoverSize = task.params.size.replace(/x/g, '×');
+  const fallbackCoverRatio = (() => {
+    const match = task.params.size.match(/^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/);
+    if (!match) return '';
+    return formatImageRatio(Number(match[1]), Number(match[2]));
+  })();
+  const displayCoverRatio = coverRatio || fallbackCoverRatio;
+  const displayCoverSize = coverSize || fallbackCoverSize;
   const swipeBgClass = showSwipeAction
     ? swipeStartedSelected
       ? 'bg-gray-500 dark:bg-gray-600'
@@ -389,7 +400,7 @@ export default function TaskCard({
 
       <div
         ref={cardRef}
-        className={`relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer touch-pan-y will-change-transform duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${
+        className={`hcai-task-card relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer touch-pan-y will-change-transform duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${
           isSwiping ? '!bg-white dark:!bg-gray-900' : ''
         } ${
           !isSwiping
@@ -467,11 +478,9 @@ export default function TaskCard({
                   onLoad={() => setStreamPreviewLoaded(true)}
                   onError={() => setStreamPreviewLoaded(false)}
                 />
-                {streamPreviewLoaded && (
-                  <span className="absolute top-1.5 right-1.5 flex items-center gap-1 rounded bg-blue-500 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm sm:text-xs">
-                    预览
-                  </span>
-                )}
+                <span className="hcai-stream-preview-badge absolute top-1.5 right-1.5 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm sm:text-xs">
+                  流式预览
+                </span>
               </>
             )}
             {task.status === 'running' &&
@@ -496,7 +505,7 @@ export default function TaskCard({
                     />
                   </svg>
                   <span className="text-xs text-gray-400 dark:text-gray-500">
-                    生成中...
+                    {isWaitingForStreamPreview ? '等待流式预览...' : '生成中...'}
                   </span>
                 </div>
               )}
@@ -591,10 +600,7 @@ export default function TaskCard({
             )}
             {/* 运行中显示耗时，完成后显示封面图比例与分辨率标签 */}
             <div className="absolute top-1.5 left-1.5 flex items-center gap-1">
-              {showRunningTimer ||
-              task.status !== 'done' ||
-              !coverRatio ||
-              !coverSize ? (
+              {showRunningTimer || task.status !== 'done' ? (
                 <span className="flex items-center gap-1 bg-black/50 text-white text-[10px] sm:text-xs px-1.5 py-0.5 rounded backdrop-blur-sm font-mono">
                   <svg
                     className="w-3 h-3"
@@ -610,16 +616,16 @@ export default function TaskCard({
                   </svg>
                   {duration}
                 </span>
-              ) : (
+              ) : displayCoverRatio && displayCoverSize ? (
                 <>
                   <span className="bg-black/50 text-white text-[10px] sm:text-xs px-1.5 py-0.5 rounded backdrop-blur-sm font-mono">
-                    {coverRatio}
+                    {displayCoverRatio}
                   </span>
                   <span className="bg-black/50 text-white/90 text-[10px] sm:text-xs px-1.5 py-0.5 rounded backdrop-blur-sm font-medium">
-                    {coverSize}
+                    {displayCoverSize}
                   </span>
                 </>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -652,7 +658,7 @@ export default function TaskCard({
                 onTouchCancel={(e) => e.stopPropagation()}>
                 {modelDisplay && (
                   <span
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-gray-600 dark:text-gray-300 text-xs flex-shrink-0"
+                    className="hcai-task-model-pill flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-gray-600 dark:text-gray-300 text-xs flex-shrink-0"
                     title={modelDisplay}>
                     <span className="truncate max-w-[8rem]">
                       {modelDisplay}
@@ -663,14 +669,13 @@ export default function TaskCard({
               {/* 操作按钮 */}
               <div
                 data-tag-scroll-area
-                className="flex items-center gap-0.5 flex-shrink-0 mt-0.5 max-w-full overflow-visible"
+                className="hcai-task-actions flex items-center gap-0.5 flex-shrink-0 mt-0.5 max-w-full overflow-visible"
                 onClick={(e) => e.stopPropagation()}
                 onTouchStart={(e) => e.stopPropagation()}
                 onTouchMove={(e) => e.stopPropagation()}
                 onTouchEnd={(e) => e.stopPropagation()}
                 onTouchCancel={(e) => e.stopPropagation()}>
-                {((task.status === 'error' && !isFalReconnecting) ||
-                  settings.alwaysShowRetryButton) && (
+                {task.status === 'error' && !isFalReconnecting && (
                   <TaskActionButton
                     tooltip="重试任务"
                     onClick={() => retryTask(task)}

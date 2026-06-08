@@ -118,7 +118,43 @@ export const ADMIN_NAV_MENUS = [
     name: 'ai_chat_config',
     path: 'ai-chat-config',
     icon: 'chat-square-text-fill',
-    children: [],
+    children: [
+      {
+        name: 'ai_chat_config_providers',
+        displayName: 'Provider 管理',
+        path: 'ai-chat-config/providers',
+      },
+      {
+        name: 'ai_chat_config_mappings',
+        displayName: '模型映射',
+        path: 'ai-chat-config/mappings',
+      },
+      {
+        name: 'ai_chat_config_plans',
+        displayName: '用户等级 / 订阅配置',
+        path: 'ai-chat-config/plans',
+      },
+      {
+        name: 'ai_chat_config_redeem_codes',
+        displayName: '订阅兑换码',
+        path: 'ai-chat-config/redeem-codes',
+      },
+      {
+        name: 'ai_chat_config_rates',
+        displayName: '模型消耗系数',
+        path: 'ai-chat-config/rates',
+      },
+      {
+        name: 'ai_chat_config_images',
+        displayName: '图片生成',
+        path: 'ai-chat-config/images',
+      },
+      {
+        name: 'ai_chat_config_videos',
+        displayName: '视频生成',
+        path: 'ai-chat-config/videos',
+      },
+    ],
   },
   {
     name: 'community',

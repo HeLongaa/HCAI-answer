@@ -582,10 +582,14 @@ describe('custom providers', () => {
     expect(clamped.profiles[0].streamPartialImages).toBe(3)
   })
 
-  it('enables Agent submit auto scroll by default', () => {
+  it('fixes removed UI options to product defaults', () => {
+    expect(DEFAULT_SETTINGS.persistInputOnRestart).toBe(false)
+    expect(normalizeSettings({ persistInputOnRestart: true }).persistInputOnRestart).toBe(false)
+    expect(normalizeSettings({ alwaysShowRetryButton: true }).alwaysShowRetryButton).toBe(false)
+    expect(normalizeSettings({ taskCompletionNotification: true }).taskCompletionNotification).toBe(false)
     expect(DEFAULT_SETTINGS.agentScrollToBottomAfterSubmit).toBe(true)
     expect(normalizeSettings({}).agentScrollToBottomAfterSubmit).toBe(true)
-    expect(normalizeSettings({ agentScrollToBottomAfterSubmit: false }).agentScrollToBottomAfterSubmit).toBe(false)
+    expect(normalizeSettings({ agentScrollToBottomAfterSubmit: false }).agentScrollToBottomAfterSubmit).toBe(true)
   })
 
   it('restores OpenAI-compatible URL after switching through fal.ai', () => {

@@ -485,6 +485,10 @@ const routes: RouteNode[] = [
             page: 'pages/Admin/AiChatConfig',
           },
           {
+            path: 'ai-chat-config/:tab',
+            page: 'pages/Admin/AiChatConfig',
+          },
+          {
             path: 'apikeys',
             page: 'pages/Admin/Apikeys',
           },

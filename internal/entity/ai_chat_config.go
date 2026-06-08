@@ -196,35 +196,36 @@ type AIImageSetting struct {
 func (AIImageSetting) TableName() string { return "ai_image_settings" }
 
 type AIImageGeneration struct {
-	ID              int       `xorm:"not null pk autoincr INT(11) id"`
-	GenerationID    string    `xorm:"not null unique VARCHAR(100) generation_id"`
-	UserID          string    `xorm:"not null index VARCHAR(100) user_id"`
-	SiteModelID     string    `xorm:"not null default '' VARCHAR(100) site_model_id"`
-	ProviderID      int       `xorm:"not null default 0 INT(11) provider_id"`
-	ProviderName    string    `xorm:"not null default '' VARCHAR(255) provider_name"`
-	ProviderModelID string    `xorm:"not null default '' VARCHAR(255) provider_model_id"`
-	Prompt          string    `xorm:"not null TEXT prompt"`
-	NegativePrompt  string    `xorm:"not null TEXT negative_prompt"`
-	AspectRatio     string    `xorm:"not null default '' VARCHAR(50) aspect_ratio"`
-	Size            string    `xorm:"not null default '' VARCHAR(50) size"`
-	Style           string    `xorm:"not null default '' VARCHAR(100) style"`
-	Quality         string    `xorm:"not null default '' VARCHAR(100) quality"`
-	OutputFormat    string    `xorm:"not null default '' VARCHAR(50) output_format"`
-	Compression     int       `xorm:"not null default 0 INT(11) compression"`
-	Moderation      string    `xorm:"not null default '' VARCHAR(50) moderation"`
-	Background      string    `xorm:"not null default '' VARCHAR(50) background"`
-	ReferenceImages string    `xorm:"not null TEXT reference_images"`
-	MaskImage       string    `xorm:"not null TEXT mask_image"`
-	APIMode         string    `xorm:"not null default '' VARCHAR(50) api_mode"`
-	ResponseID      string    `xorm:"not null default '' VARCHAR(255) response_id"`
-	ResponseOutput  string    `xorm:"not null TEXT response_output"`
-	Count           int       `xorm:"not null default 1 INT(11) count"`
-	ImageURLs       string    `xorm:"not null TEXT image_urls"`
-	Status          string    `xorm:"not null default 'completed' VARCHAR(50) status"`
-	Error           string    `xorm:"not null TEXT error"`
-	ExpiresAt       time.Time `xorm:"DATETIME expires_at"`
-	CreatedAt       time.Time `xorm:"created not null default CURRENT_TIMESTAMP TIMESTAMP created_at"`
-	UpdatedAt       time.Time `xorm:"updated not null default CURRENT_TIMESTAMP TIMESTAMP updated_at"`
+	ID               int       `xorm:"not null pk autoincr INT(11) id"`
+	GenerationID     string    `xorm:"not null unique VARCHAR(100) generation_id"`
+	UserID           string    `xorm:"not null index VARCHAR(100) user_id"`
+	SiteModelID      string    `xorm:"not null default '' VARCHAR(100) site_model_id"`
+	ProviderID       int       `xorm:"not null default 0 INT(11) provider_id"`
+	ProviderName     string    `xorm:"not null default '' VARCHAR(255) provider_name"`
+	ProviderModelID  string    `xorm:"not null default '' VARCHAR(255) provider_model_id"`
+	Prompt           string    `xorm:"not null TEXT prompt"`
+	NegativePrompt   string    `xorm:"not null TEXT negative_prompt"`
+	AspectRatio      string    `xorm:"not null default '' VARCHAR(50) aspect_ratio"`
+	Size             string    `xorm:"not null default '' VARCHAR(50) size"`
+	Style            string    `xorm:"not null default '' VARCHAR(100) style"`
+	Quality          string    `xorm:"not null default '' VARCHAR(100) quality"`
+	OutputFormat     string    `xorm:"not null default '' VARCHAR(50) output_format"`
+	Compression      int       `xorm:"not null default 0 INT(11) compression"`
+	Moderation       string    `xorm:"not null default '' VARCHAR(50) moderation"`
+	Background       string    `xorm:"not null default '' VARCHAR(50) background"`
+	ReferenceImages  string    `xorm:"not null TEXT reference_images"`
+	MaskImage        string    `xorm:"not null TEXT mask_image"`
+	APIMode          string    `xorm:"not null default '' VARCHAR(50) api_mode"`
+	ResponseID       string    `xorm:"not null default '' VARCHAR(255) response_id"`
+	ResponseOutput   string    `xorm:"not null TEXT response_output"`
+	Count            int       `xorm:"not null default 1 INT(11) count"`
+	ImageURLs        string    `xorm:"not null TEXT image_urls"`
+	PartialImageURLs string    `xorm:"not null TEXT partial_image_urls"`
+	Status           string    `xorm:"not null default 'completed' VARCHAR(50) status"`
+	Error            string    `xorm:"not null TEXT error"`
+	ExpiresAt        time.Time `xorm:"DATETIME expires_at"`
+	CreatedAt        time.Time `xorm:"created not null default CURRENT_TIMESTAMP TIMESTAMP created_at"`
+	UpdatedAt        time.Time `xorm:"updated not null default CURRENT_TIMESTAMP TIMESTAMP updated_at"`
 }
 
 func (AIImageGeneration) TableName() string { return "ai_image_generations" }

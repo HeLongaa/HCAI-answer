@@ -27,14 +27,14 @@ export const getAiChatProviders = () => {
 };
 
 export const createAiChatProvider = (params: Type.AdminAiProviderParams) => {
-  return request.post(`${base}/providers`, params);
+  return request.post<Type.AdminAiProvider>(`${base}/providers`, params);
 };
 
 export const updateAiChatProvider = (
   id: number,
   params: Type.AdminAiProviderParams,
 ) => {
-  return request.put(`${base}/providers/${id}`, params);
+  return request.put<Type.AdminAiProvider>(`${base}/providers/${id}`, params);
 };
 
 export const deleteAiChatProvider = (id: number) => {

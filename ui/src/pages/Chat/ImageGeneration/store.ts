@@ -54,6 +54,7 @@ import {
   CURRENT_THUMBNAIL_VERSION,
   putTask as dbPutTask,
   deleteTask as dbDeleteTask,
+  getAllTasks,
   getAllAgentConversations,
   clearAgentConversations as dbClearAgentConversations,
   getImage,
@@ -80,7 +81,6 @@ import {
   getAgentGeneratedImageReferenceId,
   replaceAgentPromptImageReferencesForApi,
 } from './lib/agentImageReferences';
-import { showBrowserNotification } from './lib/browserNotification';
 import {
   IMAGE_FETCH_CORS_HINT,
   normalizeBase64Image,
@@ -126,6 +126,7 @@ const MAX_THUMBNAIL_CACHE_ENTRIES = 80;
 const MAX_THUMBNAIL_BACKFILL_CONCURRENT = 4;
 const FAL_RECOVERY_POLL_MS = 10_000;
 const CUSTOM_RECOVERY_POLL_MS = 10_000;
+const LOCAL_RUNNING_TASK_STALE_MS = 10 * 60 * 1000;
 const SUPPORT_PROMPT_IMAGE_THRESHOLD = 50;
 const AGENT_INPUT_DRAFT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 const AGENT_ROUND_IMAGE_MENTION_RE = /@(?:第)?(\d+)轮图(\d+)/g;
@@ -448,10 +449,8 @@ function isAgentTask(task: TaskRecord) {
   );
 }
 
-function showTaskCompletionNotification(title: string, body: string) {
-  const settings = normalizeSettings(useStore.getState().settings);
-  if (!settings.taskCompletionNotification) return;
-  showBrowserNotification(title, { body });
+function showTaskCompletionNotification(..._args: [string, string]) {
+  return undefined;
 }
 
 function countSuccessfulOutputImages(tasks: TaskRecord[]) {
@@ -913,33 +912,12 @@ function getLatestAgentConversation(conversations: AgentConversation[]) {
 
 export function getPersistedState(state: AppState) {
   const settings = normalizeSettings(state.settings);
-  const galleryInputDraft = getPersistableGalleryInputDraft(state);
   return {
     settings,
     params: state.params,
-    ...(settings.persistInputOnRestart &&
-    (state.appMode === 'gallery' || galleryInputDraft)
-      ? {
-          prompt: galleryInputDraft?.prompt ?? '',
-          inputImages:
-            galleryInputDraft?.inputImages.map((img) => ({
-              id: img.id,
-              dataUrl: '',
-            })) ?? [],
-        }
-      : {}),
     dismissedCodexCliPrompts: state.dismissedCodexCliPrompts,
     appMode: state.appMode,
-    galleryInputDraft:
-      settings.persistInputOnRestart && galleryInputDraft
-        ? {
-            ...galleryInputDraft,
-            inputImages: galleryInputDraft.inputImages.map((img) => ({
-              id: img.id,
-              dataUrl: '',
-            })),
-          }
-        : null,
+    galleryInputDraft: null,
     ...(agentConversationMigrationPending && !agentConversationPersistenceReady
       ? {
           agentConversations: getPersistableAgentConversations(
@@ -1561,10 +1539,6 @@ function saveGalleryInputDraft(
   return isEmptyAgentInputDraft(draft) ? null : copyAgentInputDraft(draft);
 }
 
-function getPersistableGalleryInputDraft(state: AppState) {
-  return saveGalleryInputDraft(state);
-}
-
 function restoreGalleryInputDraftState(
   draft: AgentInputDraft | null,
 ): Pick<
@@ -1870,14 +1844,27 @@ export const useStore = create<AppState>()(
               return previous
                 ? {
                     ...task,
+                    id: previous.id,
+                    outputImages: previous.outputImages?.length
+                      ? previous.outputImages
+                      : task.outputImages,
+                    streamPartialImageIds: previous.streamPartialImageIds,
+                    streamPartialImageUrls:
+                      task.streamPartialImageUrls ??
+                      previous.streamPartialImageUrls,
+                    systemGenerationId:
+                      task.systemGenerationId ?? previous.systemGenerationId,
                     isFavorite: previous.isFavorite,
                     favoriteCollectionIds: previous.favoriteCollectionIds,
                   }
                 : task;
             });
-            const localTasks = state.tasks.filter(
-              (task) =>
-                shouldKeepLocalTask(task) &&
+            const shouldKeepAllLocalGalleryTasks = historyTasks.length === 0;
+            const localTasks = state.tasks.filter((task) => {
+              const isGalleryTask = (task.sourceMode ?? 'gallery') === 'gallery';
+              return (
+                (shouldKeepLocalTask(task) ||
+                  (shouldKeepAllLocalGalleryTasks && isGalleryTask)) &&
                 !historyTaskIds.has(getHistoryTaskMergeKey(task)) &&
                 !historyTaskRawImageUrlKeys.has(getTaskRawImageUrlKey(task)) &&
                 !historyTasks.some(
@@ -1885,15 +1872,15 @@ export const useStore = create<AppState>()(
                     Boolean(getTaskHistoryFingerprint(historyTask)) &&
                     getTaskHistoryFingerprint(historyTask) ===
                       getTaskHistoryFingerprint(task),
-                ),
-            );
+                )
+              );
+            });
             const localTaskIds = new Set(localTasks.map((task) => task.id));
             void Promise.allSettled(
               state.tasks
                 .filter(
                   (task) =>
-                    task.sourceMode === 'gallery' &&
-                    task.status !== 'running' &&
+                    (task.sourceMode ?? 'gallery') === 'gallery' &&
                     (!shouldKeepLocalTask(task) || !localTaskIds.has(task.id)),
                 )
                 .map((task) => dbDeleteTask(task.id)),
@@ -2491,6 +2478,16 @@ function getPersistableTask(task: TaskRecord): TaskRecord {
     : { ...task, rawResponsePayload };
 }
 
+function restoreLocalGalleryTask(task: TaskRecord): TaskRecord {
+  const restored = getPersistableTask(task);
+  return {
+    ...restored,
+    rawResponsePayload: getPersistableRawResponsePayload(
+      restored.rawResponsePayload,
+    ),
+  };
+}
+
 function putTask(task: TaskRecord): Promise<IDBValidKey> {
   return dbPutTask(getPersistableTask(task));
 }
@@ -2548,7 +2545,19 @@ function getHistoryTaskMergeKey(task: TaskRecord): string {
 
 function shouldKeepLocalTask(task: TaskRecord): boolean {
   if (task.sourceMode !== 'gallery') return true;
-  return task.status === 'running';
+  return (
+    task.status === 'running' &&
+    Date.now() - task.createdAt < LOCAL_RUNNING_TASK_STALE_MS
+  );
+}
+
+function isStaleLocalGalleryTask(task: TaskRecord): boolean {
+  if ((task.sourceMode ?? 'gallery') !== 'gallery') return false;
+  if (task.status === 'error') return true;
+  if (task.status === 'running') {
+    return Date.now() - task.createdAt >= LOCAL_RUNNING_TASK_STALE_MS;
+  }
+  return false;
 }
 
 export function getCodexCliPromptKey(settings: AppSettings): string {
@@ -3187,9 +3196,24 @@ export async function initStore() {
     useStore.setState({});
   }
 
+  const storedGalleryTasks = (await getAllTasks()).filter(
+    (task) => (task.sourceMode ?? 'gallery') === 'gallery',
+  );
+  const staleLocalGalleryTasks = storedGalleryTasks.filter(
+    isStaleLocalGalleryTask,
+  );
+  if (staleLocalGalleryTasks.length > 0) {
+    void Promise.allSettled(
+      staleLocalGalleryTasks.map((task) => dbDeleteTask(task.id)),
+    );
+  }
+  const localGalleryTasks = storedGalleryTasks
+    .filter((task) => !isStaleLocalGalleryTask(task))
+    .map(restoreLocalGalleryTask);
+
   const favoriteState = useStore.getState();
   const normalizedFavorites = normalizeLoadedFavoriteState(
-    [],
+    localGalleryTasks,
     favoriteState.favoriteCollections,
     favoriteState.defaultFavoriteCollectionId,
   );
@@ -3207,7 +3231,7 @@ export async function initStore() {
         normalizedFavorites.defaultFavoriteCollectionId,
       );
   }
-  useStore.getState().setTasks([]);
+  useStore.getState().setTasks(tasks);
 
   // 收集所有任务引用的图片 id
   const referencedIds = new Set<string>();
@@ -4188,6 +4212,7 @@ async function generateAiImageStream(
     image: string;
     partialImageIndex?: number;
   }) => void,
+  onGenerationCreated?: (generationId: string) => void,
 ): Promise<SystemImageStreamResult> {
   const token = Storage.get(LOGGED_TOKEN_STORAGE_KEY) || '';
   const headers: Record<string, string> = {
@@ -4226,6 +4251,16 @@ async function generateAiImageStream(
       );
     }
     const type = getStreamString(event, 'type');
+    if (type === 'ping' || type === 'keep-alive' || type === 'heartbeat') {
+      return;
+    }
+    if (type === 'image_generation.created') {
+      generationId = getStreamString(event, 'generation_id') || generationId;
+      if (generationId) onGenerationCreated?.(generationId);
+      responseSize = responseSize || getStreamString(event, 'size');
+      expiresAt = getStreamNumber(event, 'expires_at') || expiresAt;
+      return;
+    }
     if (
       type === 'image_generation.partial_image' ||
       type === 'image_edit.partial_image' ||
@@ -4348,6 +4383,9 @@ async function mapSystemImageGenerationToTask(
   generation: AiImageGeneration,
 ): Promise<TaskRecord> {
   const rawImageUrls = (generation.image_urls || []).filter(Boolean);
+  const streamPartialImageUrls = (generation.partial_image_urls || []).filter(
+    Boolean,
+  );
 
   const status = normalizeSystemGenerationStatus(generation.status);
   const createdAt = (generation.created_at || 0) * 1000 || Date.now();
@@ -4383,6 +4421,9 @@ async function mapSystemImageGenerationToTask(
     maskTargetImageId: null,
     maskImageId: null,
     outputImages: [],
+    streamPartialImageUrls: streamPartialImageUrls.length
+      ? streamPartialImageUrls
+      : undefined,
     rawImageUrls: rawImageUrls.length ? rawImageUrls : undefined,
     systemGenerationId: generation.generation_id,
     rawResponsePayload: generation.response_output || undefined,
@@ -4568,6 +4609,9 @@ async function executeSystemImageTask(taskId: string) {
           (partial) => {
             useStore.getState().setTaskStreamPreview(taskId, partial.image, 0);
             void persistTaskStreamPartialImage(taskId, partial.image);
+          },
+          (generationId) => {
+            updateTaskInStore(taskId, { systemGenerationId: generationId });
           },
         )
       : await generateAiImage(requestParams);

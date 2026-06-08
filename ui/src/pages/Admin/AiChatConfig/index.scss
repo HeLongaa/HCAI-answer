@@ -137,15 +137,37 @@
   }
 
   .ai-chat-config-action-cell {
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 8px;
+    vertical-align: top;
+    white-space: nowrap;
   }
 
   .ai-chat-config-action-cell .btn {
     margin: 0;
     white-space: nowrap;
+  }
+
+  .ai-chat-config-action-cell .btn + .btn {
+    margin-left: 8px;
+  }
+
+  .ai-chat-config-model-count-btn {
+    min-width: 32px;
+    padding: 2px 8px;
+    border: 1px solid rgba(var(--bs-primary-rgb), 0.2);
+    border-radius: 999px;
+    color: var(--bs-primary);
+    background-color: rgba(var(--bs-primary-rgb), 0.08);
+    font-weight: 760;
+    line-height: 1.4;
+    text-decoration: none;
+  }
+
+  .ai-chat-config-model-count-btn:hover,
+  .ai-chat-config-model-count-btn:focus-visible {
+    color: #fff;
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+    text-decoration: none;
   }
 
   .ai-chat-config-test-result {
@@ -396,5 +418,18 @@
   .ai-chat-config-upstream-row {
     border-color: rgba(210, 225, 255, 0.16);
     background-color: rgba(28, 39, 58, 0.72);
+  }
+
+  .ai-chat-config-model-count-btn {
+    border-color: rgba(118, 157, 255, 0.28);
+    color: #9bbcff;
+    background-color: rgba(var(--bs-primary-rgb), 0.16);
+  }
+
+  .ai-chat-config-model-count-btn:hover,
+  .ai-chat-config-model-count-btn:focus-visible {
+    color: #fff;
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
   }
 }

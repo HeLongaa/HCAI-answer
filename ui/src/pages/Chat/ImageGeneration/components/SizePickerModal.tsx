@@ -271,9 +271,12 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                             className={`${buttonClass(ratio === item.value)} flex flex-col items-center justify-center gap-1.5 !py-2.5`}
                             onClick={() => selectPresetRatio(item.value)}
                           >
-                            <div className="flex h-5 w-5 items-center justify-center">
-                              <div
-                                className="border-[1.5px] border-current rounded-[3px] opacity-60"
+                            <div
+                              className="hcai-size-picker-ratio-icon"
+                              aria-hidden="true"
+                            >
+                              <span
+                                className="hcai-size-picker-ratio-shape"
                                 style={{
                                   width: isHorizontal || isSquare ? '100%' : `${(w / h) * 100}%`,
                                   height: !isHorizontal || isSquare ? '100%' : `${(h / w) * 100}%`,

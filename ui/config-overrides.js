@@ -181,6 +181,28 @@ module.exports = {
           target: process.env.REACT_APP_API_URL,
           changeOrigin: true,
           secure: false,
+          timeout: 10 * 60 * 1000,
+          proxyTimeout: 10 * 60 * 1000,
+          onProxyReq(proxyReq, req) {
+            if (
+              req.url &&
+              req.method === 'POST' &&
+              req.url.startsWith('/answer/api/v1/ai-image/generations')
+            ) {
+              proxyReq.setHeader('Accept-Encoding', 'identity');
+            }
+          },
+          onProxyRes(proxyRes, req) {
+            if (
+              req.url &&
+              req.method === 'POST' &&
+              req.url.startsWith('/answer/api/v1/ai-image/generations')
+            ) {
+              proxyRes.headers['x-accel-buffering'] = 'no';
+              proxyRes.headers['cache-control'] = 'no-cache, no-transform';
+              delete proxyRes.headers['content-length'];
+            }
+          },
         },
         {
           context: ['/custom.css'],

@@ -50,6 +50,7 @@ func HandleResponse(ctx *gin.Context, err error, data any) {
 
 	// log internal server error
 	if myErrors.IsInternalServer(myErr) {
+		log.Errorf("%s %s?%s", ctx.Request.Method, ctx.Request.URL.Path, ctx.Request.URL.RawQuery)
 		log.Error(myErr)
 	}
 

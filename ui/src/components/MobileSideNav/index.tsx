@@ -23,9 +23,11 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import classNames from 'classnames';
 
 import { SideNav, AdminSideNav, Icon } from '@/components';
+import { CHAT_WORKSPACE_STORAGE_KEY } from '@/common/constants';
 import type { ConversationListItem } from '@/common/interface';
 import { getConversationList } from '@/services';
 import { siteInfoStore } from '@/stores';
+import { Storage } from '@/utils';
 
 import './index.scss';
 
@@ -59,6 +61,11 @@ const MobileSideNav = ({ show, onHide }) => {
     pathname.startsWith('/review');
   const isTaskPage = pathname.startsWith('/tasks');
   const siteInfo = siteInfoStore((state) => state.siteInfo);
+  const storedChatWorkspace = Storage.get(CHAT_WORKSPACE_STORAGE_KEY);
+  const workbenchPath =
+    storedChatWorkspace === 'image' || storedChatWorkspace === 'video'
+      ? `/?workspace=${storedChatWorkspace}`
+      : '/';
   const [conversationsOpen, setConversationsOpen] = useState(true);
   const [conversationList, setConversationList] = useState<
     ConversationListItem[]
@@ -142,7 +149,7 @@ const MobileSideNav = ({ show, onHide }) => {
         aria-hidden={!show}
         className={classNames('px-3 py-4', { show })}>
         <NavLink
-          to="/"
+          to={workbenchPath}
           className="mobile-side-site-brand"
           onClick={closeSideNav}>
           {siteInfo.name}
@@ -150,7 +157,7 @@ const MobileSideNav = ({ show, onHide }) => {
 
         <div className="mobile-page-switch" aria-label="页面切换">
           <NavLink
-            to="/"
+            to={workbenchPath}
             end
             onClick={closeSideNav}
             className={pathname === '/' ? 'active' : ''}>

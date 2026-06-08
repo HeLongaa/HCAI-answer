@@ -62,20 +62,47 @@ const (
 	videoReferenceImageMaxBytes  = 5 * 1024 * 1024
 	defaultImageDownloadMaxBytes = 20 * 1024 * 1024
 	imageDownloadTimeout         = 15 * time.Second
+	imageCreateTimeout           = 10 * time.Minute
 	adminAIConfigFetchTimeout    = 30 * time.Second
 	adminAIConfigTestTimeout     = 60 * time.Second
 	videoCreateTimeout           = 60 * time.Second
 	videoStatusTimeout           = 15 * time.Second
 	videoContentTimeout          = 5 * time.Minute
+	imageStreamRetryMaxAttempts  = 3
+	imageStreamBlockLogLimit     = 8
 )
 
 var (
 	modelIDPattern     = regexp.MustCompile(`^[a-z0-9_-]+$`)
 	base64DataPattern  = regexp.MustCompile(`"b64_json"\s*:\s*"[^"]+"`)
+	imageResultPattern = regexp.MustCompile(`"(partial_image_b64|result)"\s*:\s*"[^"]+"`)
 	dataURLPattern     = regexp.MustCompile(`data:image/[^;]+;base64,[A-Za-z0-9+/=_-]+`)
 	retryAfterPattern  = regexp.MustCompile(`(?i)try again in\s+(\d+)\s*ms`)
 	bearerTokenPattern = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]+`)
 	secretJSONPattern  = regexp.MustCompile(`(?i)"(api[_-]?key|authorization|token|secret|access[_-]?token)"\s*:\s*"[^"]+"`)
+)
+
+var imageStreamHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+}
+
+var (
+	imageStreamHeartbeatInterval = 12 * time.Second
+	imageStreamUpstreamIdleLimit = imageCreateTimeout
+	imageStreamRetryDelay        = 15 * time.Second
+	imageStreamDownstreamTimeout = 2 * time.Second
 )
 
 type AiChatConfigService interface {
@@ -1366,30 +1393,32 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 	setting, _ := s.GetImageSetting(runCtx)
 	expiresAt := time.Now().AddDate(0, 0, setting.RetentionDays)
 	pendingURLs, _ := json.Marshal([]string{})
+	pendingPartialURLs, _ := json.Marshal([]string{})
 	record := &entity.AIImageGeneration{
-		GenerationID:    generationID,
-		UserID:          userID,
-		SiteModelID:     model.SiteModelID,
-		ProviderID:      provider.ID,
-		ProviderName:    provider.Name,
-		ProviderModelID: upstreamModel.ProviderModelID,
-		Prompt:          req.Prompt,
-		NegativePrompt:  req.NegativePrompt,
-		AspectRatio:     req.AspectRatio,
-		Size:            req.Size,
-		Style:           req.Style,
-		Quality:         req.Quality,
-		OutputFormat:    req.OutputFormat,
-		Compression:     req.Compression,
-		Moderation:      req.Moderation,
-		Background:      req.Background,
-		ReferenceImages: string(referenceImagesJSON),
-		MaskImage:       req.MaskImage,
-		APIMode:         normalizeImageAPIMode(model.APIMode),
-		Count:           req.Count,
-		ImageURLs:       string(pendingURLs),
-		Status:          "generating",
-		ExpiresAt:       expiresAt,
+		GenerationID:     generationID,
+		UserID:           userID,
+		SiteModelID:      model.SiteModelID,
+		ProviderID:       provider.ID,
+		ProviderName:     provider.Name,
+		ProviderModelID:  upstreamModel.ProviderModelID,
+		Prompt:           req.Prompt,
+		NegativePrompt:   req.NegativePrompt,
+		AspectRatio:      req.AspectRatio,
+		Size:             req.Size,
+		Style:            req.Style,
+		Quality:          req.Quality,
+		OutputFormat:     req.OutputFormat,
+		Compression:      req.Compression,
+		Moderation:       req.Moderation,
+		Background:       req.Background,
+		ReferenceImages:  string(referenceImagesJSON),
+		MaskImage:        req.MaskImage,
+		APIMode:          normalizeImageAPIMode(model.APIMode),
+		Count:            req.Count,
+		ImageURLs:        string(pendingURLs),
+		PartialImageURLs: string(pendingPartialURLs),
+		Status:           "generating",
+		ExpiresAt:        expiresAt,
 	}
 	monthStart, monthEnd := currentMonthRange()
 	if err := s.repo.CreateImageGenerationWithQuota(runCtx, record, plan.ImageQuota, monthStart, monthEnd); err != nil {
@@ -1511,30 +1540,32 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 	setting, _ := s.GetImageSetting(runCtx)
 	expiresAt := time.Now().AddDate(0, 0, setting.RetentionDays)
 	pendingURLs, _ := json.Marshal([]string{})
+	pendingPartialURLs, _ := json.Marshal([]string{})
 	referenceImagesJSON, _ := json.Marshal(req.ReferenceImages)
 	record := &entity.AIImageGeneration{
-		GenerationID:    generationID,
-		UserID:          userID,
-		SiteModelID:     model.SiteModelID,
-		ProviderID:      provider.ID,
-		ProviderName:    provider.Name,
-		ProviderModelID: upstreamModel.ProviderModelID,
-		Prompt:          req.Prompt,
-		NegativePrompt:  req.NegativePrompt,
-		AspectRatio:     req.AspectRatio,
-		Size:            req.Size,
-		Style:           req.Style,
-		Quality:         req.Quality,
-		OutputFormat:    req.OutputFormat,
-		Compression:     req.Compression,
-		Moderation:      req.Moderation,
-		Background:      req.Background,
-		ReferenceImages: string(referenceImagesJSON),
-		APIMode:         apiMode,
-		Count:           1,
-		ImageURLs:       string(pendingURLs),
-		Status:          "generating",
-		ExpiresAt:       expiresAt,
+		GenerationID:     generationID,
+		UserID:           userID,
+		SiteModelID:      model.SiteModelID,
+		ProviderID:       provider.ID,
+		ProviderName:     provider.Name,
+		ProviderModelID:  upstreamModel.ProviderModelID,
+		Prompt:           req.Prompt,
+		NegativePrompt:   req.NegativePrompt,
+		AspectRatio:      req.AspectRatio,
+		Size:             req.Size,
+		Style:            req.Style,
+		Quality:          req.Quality,
+		OutputFormat:     req.OutputFormat,
+		Compression:      req.Compression,
+		Moderation:       req.Moderation,
+		Background:       req.Background,
+		ReferenceImages:  string(referenceImagesJSON),
+		APIMode:          apiMode,
+		Count:            1,
+		ImageURLs:        string(pendingURLs),
+		PartialImageURLs: string(pendingPartialURLs),
+		Status:           "generating",
+		ExpiresAt:        expiresAt,
 	}
 	monthStart, monthEnd := currentMonthRange()
 	if err := s.repo.CreateImageGenerationWithQuota(runCtx, record, plan.ImageQuota, monthStart, monthEnd); err != nil {
@@ -1554,27 +1585,24 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 	if err != nil {
 		return err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(provider.BaseURL, "/")+endpoint, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return err
-	}
-	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", provider.APIKey))
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream, application/json")
-	resp, err := http.DefaultClient.Do(httpReq)
+	upstreamURL := strings.TrimRight(provider.BaseURL, "/") + endpoint
+	_ = writeImageSSE(writer, map[string]any{
+		"type":          "image_generation.created",
+		"generation_id": generationID,
+		"status":        "generating",
+		"size":          req.Size,
+		"expires_at":    expiresAt.Unix(),
+	})
+	flush()
+
+	resp, err := doImageStreamUpstreamRequest(runCtx, upstreamURL, provider.APIKey, bodyBytes, generationID, endpoint)
 	if err != nil {
 		_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		body, _ := io.ReadAll(resp.Body)
-		err := fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
-		_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
-		return err
-	}
 
-	finalBody, err := s.proxyAndSaveImageStream(ctx, runCtx, resp.Body, writer, flush, userID, generationID, req.Size)
+	finalBody, err := s.proxyAndSaveImageStream(runCtx, ctx, resp.Body, writer, flush, userID, generationID, req.Size)
 	if err != nil {
 		_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
 		return err
@@ -1600,14 +1628,15 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 		"expires_at":    expiresAt.Unix(),
 		"data":          imageURLsToSSEData(imageURLs),
 	}
-	writeImageSSE(writer, completed)
-	flush()
+	if err := writeImageSSEWithFlush(ctx, writer, completed, flush, imageStreamDownstreamTimeout); err != nil {
+		log.Warnf("ai image stream completed downstream write skipped generation_id=%s user_id=%s error=%v", generationID, userID, err)
+	}
 	return nil
 }
 
 func (s *aiChatConfigService) proxyAndSaveImageStream(
 	ctx context.Context,
-	_ context.Context,
+	clientCtx context.Context,
 	body io.Reader,
 	writer io.Writer,
 	flush func(),
@@ -1615,99 +1644,291 @@ func (s *aiChatConfigService) proxyAndSaveImageStream(
 	generationID string,
 	size string,
 ) ([]byte, error) {
-	reader := bufio.NewReader(body)
-	var block strings.Builder
 	var finalBody []byte
+	var lastPartialImage string
+	var lastPartialAt time.Time
+	partialImageURLs := make([]string, 0, 3)
+	rawLogCount := 0
+	finalReady := false
+	lastUpstreamAt := time.Now()
+	lastDownstreamAt := time.Now()
+	downstreamOpen := true
+	blocks := make(chan imageStreamReadBlock)
+	go readImageStreamBlocks(ctx, body, blocks)
+
+	heartbeatTicker := time.NewTicker(imageStreamHeartbeatInterval)
+	defer heartbeatTicker.Stop()
+	idleTicker := time.NewTicker(time.Second)
+	defer idleTicker.Stop()
+
+	markDownstreamClosedIfNeeded := func() bool {
+		if !downstreamOpen {
+			return false
+		}
+		select {
+		case <-clientCtx.Done():
+			downstreamOpen = false
+			log.Warnf("ai image stream downstream closed generation_id=%s user_id=%s error=%v", generationID, userID, clientCtx.Err())
+			return false
+		default:
+			return true
+		}
+	}
+
+	forwardPayload := func(payload any) {
+		if !markDownstreamClosedIfNeeded() {
+			return
+		}
+		if err := writeImageSSEWithFlush(clientCtx, writer, payload, flush, imageStreamDownstreamTimeout); err != nil {
+			downstreamOpen = false
+			log.Warnf("ai image stream downstream payload write failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+			return
+		}
+		lastDownstreamAt = time.Now()
+	}
+
+	forwardComment := func(comment string) {
+		if !markDownstreamClosedIfNeeded() {
+			return
+		}
+		if err := writeImageSSECommentWithFlush(clientCtx, writer, comment, flush, imageStreamDownstreamTimeout); err != nil {
+			downstreamOpen = false
+			log.Warnf("ai image stream downstream comment write failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+			return
+		}
+		lastDownstreamAt = time.Now()
+	}
 
 	processBlock := func(raw string) error {
-		dataLines := make([]string, 0)
-		for _, line := range strings.Split(raw, "\n") {
-			line = strings.TrimRight(line, "\r")
-			if line == "" || strings.HasPrefix(line, ":") {
-				continue
-			}
-			if strings.HasPrefix(line, "data:") {
-				dataLines = append(dataLines, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
-			}
-		}
-		data := strings.TrimSpace(strings.Join(dataLines, "\n"))
-		if data == "" || data == "[DONE]" {
-			return nil
-		}
-
-		var event map[string]any
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
+		result, err := parseImageStreamBlock(raw, size)
+		if err != nil {
 			return err
 		}
-		eventType, _ := event["type"].(string)
-		object, _ := event["object"].(string)
-
-		if eventType == "image_generation.partial_image" ||
-			eventType == "image_edit.partial_image" ||
-			eventType == "response.image_generation_call.partial_image" {
-			writeImageSSE(writer, event)
-			flush()
+		if result.Empty {
 			return nil
 		}
-
-		if object == "image.generation.result" || object == "image.edit.result" {
-			finalBody = []byte(data)
-			writeImageSSE(writer, event)
-			flush()
-			return nil
+		if rawLogCount < imageStreamBlockLogLimit {
+			rawLogCount++
+			log.Infof("ai image stream upstream event generation_id=%s user_id=%s type=%s object=%s raw=%s", generationID, userID, result.EventType, result.Object, safeUpstreamResponse([]byte(result.Data)))
 		}
-
-		if eventType == "image_generation.completed" || eventType == "image_edit.completed" {
-			finalBody = imageCompletedEventBody(event, size)
-			writeImageSSE(writer, event)
-			flush()
-			return nil
+		if result.PartialImageB64 != "" || len(result.FinalBody) > 0 {
+			log.Infof("ai image stream upstream parsed generation_id=%s user_id=%s type=%s object=%s forward=%t partial=%t partial_index=%d final_bytes=%d final_has_image=%t keys=%s", generationID, userID, result.EventType, result.Object, result.Forward, result.PartialImageB64 != "", result.PartialImageIndex, len(result.FinalBody), responseBodyHasImageData(result.FinalBody), imageStreamEventKeys(result.Event))
 		}
-
-		if eventType == "response.output_item.done" || eventType == "response.completed" {
-			if body := responsesStreamEventBody(event); len(body) > 0 {
-				if len(finalBody) == 0 || responseBodyHasImageData(body) {
-					finalBody = body
+		if result.PartialImageB64 != "" {
+			lastPartialImage = result.PartialImageB64
+			lastPartialAt = time.Now()
+			if imageURL, err := s.saveImageStreamPartial(userID, generationID, result.PartialImageIndex, result.PartialImageB64); err != nil {
+				log.Errorf("ai image stream partial save failed generation_id=%s user_id=%s index=%d error=%v", generationID, userID, result.PartialImageIndex, err)
+			} else if imageURL != "" {
+				partialIndex := result.PartialImageIndex
+				if partialIndex < 0 {
+					partialIndex = len(partialImageURLs)
 				}
-				writeImageSSE(writer, event)
-				flush()
+				for len(partialImageURLs) <= partialIndex {
+					partialImageURLs = append(partialImageURLs, "")
+				}
+				partialImageURLs[partialIndex] = imageURL
+				rawPartialURLs, _ := json.Marshal(filterNonEmptyStrings(partialImageURLs))
+				if err := s.repo.UpdateImageGeneration(ctx, generationID, &entity.AIImageGeneration{
+					PartialImageURLs: string(rawPartialURLs),
+				}, "partial_image_urls"); err != nil {
+					log.Errorf("ai image stream partial record update failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+				}
 			}
-			return nil
+		}
+		if len(result.FinalBody) > 0 && (len(finalBody) == 0 || responseBodyHasImageData(result.FinalBody)) {
+			finalBody = result.FinalBody
+			finalReady = responseBodyHasImageData(finalBody)
+			log.Infof("ai image stream final body captured generation_id=%s user_id=%s type=%s object=%s bytes=%d has_image=%t", generationID, userID, result.EventType, result.Object, len(result.FinalBody), finalReady)
+		}
+		if result.Forward {
+			forwardPayload(result.Event)
 		}
 		return nil
 	}
 
 	for {
+		select {
+		case <-ctx.Done():
+			log.Warnf("ai image stream run context done generation_id=%s user_id=%s error=%v", generationID, userID, ctx.Err())
+			return nil, ctx.Err()
+		case block, ok := <-blocks:
+			if !ok {
+				if len(finalBody) == 0 {
+					log.Warnf("ai image stream upstream closed without final generation_id=%s user_id=%s last_partial=%t last_partial_age=%s", generationID, userID, lastPartialImage != "", time.Since(lastPartialAt).Round(time.Second))
+					return nil, fmt.Errorf("stream image generation did not return final image data")
+				}
+				log.Infof("ai image stream final received generation_id=%s user_id=%s bytes=%d", generationID, userID, len(finalBody))
+				return finalBody, nil
+			}
+			if block.Raw != "" {
+				lastUpstreamAt = time.Now()
+				if err := processBlock(block.Raw); err != nil {
+					return nil, err
+				}
+				if finalReady {
+					log.Infof("ai image stream final ready generation_id=%s user_id=%s bytes=%d", generationID, userID, len(finalBody))
+					return finalBody, nil
+				}
+			}
+			if block.Err != nil {
+				if ctx.Err() != nil {
+					log.Warnf("ai image stream read stopped after context done generation_id=%s user_id=%s error=%v", generationID, userID, ctx.Err())
+					return nil, ctx.Err()
+				}
+				log.Warnf("ai image stream upstream read error generation_id=%s user_id=%s error=%v", generationID, userID, block.Err)
+				return nil, block.Err
+			}
+		case <-heartbeatTicker.C:
+			if time.Since(lastDownstreamAt) >= imageStreamHeartbeatInterval {
+				forwardComment("keep-alive")
+			}
+		case <-idleTicker.C:
+			if time.Since(lastUpstreamAt) > imageStreamUpstreamIdleLimit {
+				log.Warnf("ai image stream upstream idle timeout generation_id=%s user_id=%s idle=%s last_partial=%t last_partial_age=%s", generationID, userID, time.Since(lastUpstreamAt).Round(time.Second), lastPartialImage != "", time.Since(lastPartialAt).Round(time.Second))
+				return nil, fmt.Errorf("stream image upstream idle timeout after %s", imageStreamUpstreamIdleLimit)
+			}
+		}
+	}
+}
+
+type imageStreamReadBlock struct {
+	Raw string
+	Err error
+}
+
+type imageStreamBlockResult struct {
+	Empty             bool
+	Forward           bool
+	Event             map[string]any
+	EventType         string
+	Object            string
+	Data              string
+	FinalBody         []byte
+	PartialImageB64   string
+	PartialImageIndex int
+}
+
+func readImageStreamBlocks(ctx context.Context, body io.Reader, blocks chan<- imageStreamReadBlock) {
+	defer close(blocks)
+	reader := bufio.NewReader(body)
+	var block strings.Builder
+	emit := func(raw string, err error) bool {
+		select {
+		case blocks <- imageStreamReadBlock{Raw: raw, Err: err}:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	for {
 		line, err := reader.ReadString('\n')
 		if line != "" {
 			block.WriteString(line)
 			if strings.TrimRight(line, "\r\n") == "" {
-				if err := processBlock(block.String()); err != nil {
-					return nil, err
+				if !emit(block.String(), nil) {
+					return
 				}
 				block.Reset()
 			}
 		}
 		if err != nil {
 			if err == io.EOF {
-				break
+				if strings.TrimSpace(block.String()) != "" {
+					emit(block.String(), nil)
+				}
+				return
 			}
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, err
+			emit("", err)
+			return
 		}
 	}
-	if strings.TrimSpace(block.String()) != "" {
-		if err := processBlock(block.String()); err != nil {
-			return nil, err
+}
+
+func parseImageStreamBlock(raw, size string) (*imageStreamBlockResult, error) {
+	dataLines := make([]string, 0)
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
 		}
 	}
-	if len(finalBody) == 0 {
-		return nil, fmt.Errorf("stream image generation did not return final image data")
+	data := strings.TrimSpace(strings.Join(dataLines, "\n"))
+	if data == "" || data == "[DONE]" {
+		return &imageStreamBlockResult{Empty: true}, nil
 	}
-	log.Infof("ai image stream final received generation_id=%s user_id=%s bytes=%d", generationID, userID, len(finalBody))
-	return finalBody, nil
+	var event map[string]any
+	if err := json.Unmarshal([]byte(data), &event); err != nil {
+		return nil, err
+	}
+	result := &imageStreamBlockResult{Event: event, Data: data}
+	result.EventType, _ = event["type"].(string)
+	result.Object, _ = event["object"].(string)
+	if result.EventType == "image_generation.partial_image" ||
+		result.EventType == "image_edit.partial_image" ||
+		result.EventType == "response.image_generation_call.partial_image" {
+		result.Forward = true
+		result.PartialImageB64 = imageStreamPartialImageB64(event)
+		result.PartialImageIndex = imageStreamPartialImageIndex(event)
+		return result, nil
+	}
+	if result.Object == "image.generation.result" || result.Object == "image.edit.result" {
+		result.Forward = true
+		result.FinalBody = []byte(data)
+		return result, nil
+	}
+	if result.EventType == "image_generation.completed" || result.EventType == "image_edit.completed" {
+		result.Forward = true
+		result.FinalBody = imageCompletedEventBody(event, size)
+		return result, nil
+	}
+	if result.EventType == "response.output_item.done" || result.EventType == "response.completed" {
+		if body := responsesStreamEventBody(event); len(body) > 0 {
+			result.Forward = true
+			result.FinalBody = body
+		}
+	}
+	return result, nil
+}
+
+func imageStreamPartialImageB64(event map[string]any) string {
+	if value, ok := event["b64_json"].(string); ok && strings.TrimSpace(value) != "" {
+		return value
+	}
+	if value, ok := event["partial_image_b64"].(string); ok && strings.TrimSpace(value) != "" {
+		return value
+	}
+	return ""
+}
+
+func imageStreamPartialImageIndex(event map[string]any) int {
+	switch value := event["partial_image_index"].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case json.Number:
+		parsed, err := value.Int64()
+		if err == nil {
+			return int(parsed)
+		}
+	}
+	return -1
+}
+
+func filterNonEmptyStrings(values []string) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
 }
 
 func imageCompletedEventBody(event map[string]any, size string) []byte {
@@ -1722,6 +1943,18 @@ func imageCompletedEventBody(event map[string]any, size string) []byte {
 	}
 	body, _ := json.Marshal(map[string]any{"data": []map[string]any{item}})
 	return body
+}
+
+func imageStreamEventKeys(event map[string]any) string {
+	if len(event) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(event))
+	for key := range event {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }
 
 func responsesStreamEventBody(event map[string]any) []byte {
@@ -1782,9 +2015,60 @@ func imageURLsToSSEData(imageURLs []string) []map[string]any {
 	return data
 }
 
-func writeImageSSE(writer io.Writer, payload any) {
+func writeImageSSE(writer io.Writer, payload any) error {
 	body, _ := json.Marshal(payload)
-	_, _ = fmt.Fprintf(writer, "data: %s\n\n", body)
+	_, err := fmt.Fprintf(writer, "data: %s\n\n", body)
+	return err
+}
+
+func writeImageSSEComment(writer io.Writer, comment string) error {
+	comment = strings.ReplaceAll(comment, "\n", " ")
+	_, err := fmt.Fprintf(writer, ": %s\n\n", comment)
+	return err
+}
+
+func writeImageSSEWithFlush(ctx context.Context, writer io.Writer, payload any, flush func(), timeout time.Duration) error {
+	return writeImageStreamDownstream(ctx, timeout, func() error {
+		if err := writeImageSSE(writer, payload); err != nil {
+			return err
+		}
+		if flush != nil {
+			flush()
+		}
+		return nil
+	})
+}
+
+func writeImageSSECommentWithFlush(ctx context.Context, writer io.Writer, comment string, flush func(), timeout time.Duration) error {
+	return writeImageStreamDownstream(ctx, timeout, func() error {
+		if err := writeImageSSEComment(writer, comment); err != nil {
+			return err
+		}
+		if flush != nil {
+			flush()
+		}
+		return nil
+	})
+}
+
+func writeImageStreamDownstream(ctx context.Context, timeout time.Duration, write func() error) error {
+	if timeout <= 0 {
+		return write()
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- write()
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return fmt.Errorf("downstream write timeout after %s", timeout)
+	}
 }
 
 func (s *aiChatConfigService) buildImageStreamPayload(model *entity.AIImageModel, req *schema.AIImageGenerateReq) map[string]any {
@@ -2022,6 +2306,16 @@ func (s *aiChatConfigService) ListUserImageGenerations(ctx context.Context, user
 	}
 	resp := make([]*schema.AIImageGenerationResp, 0, len(records))
 	for _, record := range records {
+		if isTimedOutImageGeneration(record) {
+			record.Status = "failed"
+			record.Error = imageGenerationTimeoutError()
+			if err := s.repo.UpdateImageGeneration(ctx, record.GenerationID, &entity.AIImageGeneration{
+				Status: record.Status,
+				Error:  record.Error,
+			}, "status", "error"); err != nil {
+				log.Errorf("ai image generation timeout status update failed generation_id=%s user_id=%s error=%v", record.GenerationID, userID, err)
+			}
+		}
 		resp = append(resp, s.formatImageGeneration(record))
 	}
 	return resp, nil
@@ -2793,38 +3087,41 @@ func (s *aiChatConfigService) formatImageSetting(setting *entity.AIImageSetting)
 func (s *aiChatConfigService) formatImageGeneration(record *entity.AIImageGeneration) *schema.AIImageGenerationResp {
 	imageURLs := make([]string, 0)
 	_ = json.Unmarshal([]byte(record.ImageURLs), &imageURLs)
+	partialImageURLs := make([]string, 0)
+	_ = json.Unmarshal([]byte(record.PartialImageURLs), &partialImageURLs)
 	referenceImages := make([]string, 0)
 	_ = json.Unmarshal([]byte(record.ReferenceImages), &referenceImages)
 	return &schema.AIImageGenerationResp{
-		ID:              record.ID,
-		GenerationID:    record.GenerationID,
-		UserID:          record.UserID,
-		SiteModelID:     record.SiteModelID,
-		ProviderID:      record.ProviderID,
-		ProviderName:    record.ProviderName,
-		ProviderModelID: record.ProviderModelID,
-		Prompt:          record.Prompt,
-		NegativePrompt:  record.NegativePrompt,
-		AspectRatio:     record.AspectRatio,
-		Size:            record.Size,
-		Style:           record.Style,
-		Quality:         record.Quality,
-		OutputFormat:    record.OutputFormat,
-		Compression:     record.Compression,
-		Moderation:      record.Moderation,
-		Background:      record.Background,
-		ReferenceImages: referenceImages,
-		MaskImage:       record.MaskImage,
-		APIMode:         record.APIMode,
-		ResponseID:      record.ResponseID,
-		ResponseOutput:  record.ResponseOutput,
-		Count:           record.Count,
-		ImageURLs:       imageURLs,
-		Status:          record.Status,
-		Error:           record.Error,
-		ExpiresAt:       unixOrZero(record.ExpiresAt),
-		CreatedAt:       unixOrZero(record.CreatedAt),
-		UpdatedAt:       unixOrZero(record.UpdatedAt),
+		ID:               record.ID,
+		GenerationID:     record.GenerationID,
+		UserID:           record.UserID,
+		SiteModelID:      record.SiteModelID,
+		ProviderID:       record.ProviderID,
+		ProviderName:     record.ProviderName,
+		ProviderModelID:  record.ProviderModelID,
+		Prompt:           record.Prompt,
+		NegativePrompt:   record.NegativePrompt,
+		AspectRatio:      record.AspectRatio,
+		Size:             record.Size,
+		Style:            record.Style,
+		Quality:          record.Quality,
+		OutputFormat:     record.OutputFormat,
+		Compression:      record.Compression,
+		Moderation:       record.Moderation,
+		Background:       record.Background,
+		ReferenceImages:  referenceImages,
+		MaskImage:        record.MaskImage,
+		APIMode:          record.APIMode,
+		ResponseID:       record.ResponseID,
+		ResponseOutput:   record.ResponseOutput,
+		Count:            record.Count,
+		ImageURLs:        imageURLs,
+		PartialImageURLs: partialImageURLs,
+		Status:           record.Status,
+		Error:            record.Error,
+		ExpiresAt:        unixOrZero(record.ExpiresAt),
+		CreatedAt:        unixOrZero(record.CreatedAt),
+		UpdatedAt:        unixOrZero(record.UpdatedAt),
 	}
 }
 
@@ -2980,9 +3277,7 @@ func (s *aiChatConfigService) callAndSaveImages(
 			return nil, err
 		}
 		log.Infof("ai image upstream route generation_id=%s api_mode=responses references=%d", generationID, len(preparedImages))
-		return s.callResponsesImageAPI(
-			ctx, resty.New().SetRetryCount(1), baseURL, provider, model, generationID, userID, req, prompt, preparedImages,
-		)
+		return s.callResponsesImageAPI(ctx, newImageRestyClient(), baseURL, provider, model, generationID, userID, req, prompt, preparedImages)
 	}
 	if len(req.ReferenceImages) > 0 {
 		if !model.SupportsRefs {
@@ -3004,8 +3299,7 @@ func (s *aiChatConfigService) callAndSaveImages(
 		)
 	}
 	log.Infof("ai image upstream request generation_id=%s endpoint=%s model=%s size=%s count=%d references=0", generationID, "/images/generations", model.ProviderModelID, req.Size, req.Count)
-	resp, err := resty.New().
-		SetRetryCount(1).
+	resp, err := newImageRestyClient().
 		SetHeader("Authorization", fmt.Sprintf("Bearer %s", provider.APIKey)).
 		SetHeader("Content-Type", "application/json").
 		R().
@@ -3056,7 +3350,7 @@ func (s *aiChatConfigService) callAndSaveImagesWithReferences(
 	basePayload map[string]any,
 	referenceImages []*preparedReferenceImage,
 ) ([]string, error) {
-	client := resty.New().SetRetryCount(1)
+	client := newImageRestyClient()
 	var lastErr error
 
 	if model.SupportsEdits {
@@ -3345,6 +3639,17 @@ func (s *aiChatConfigService) saveGeneratedImage(userID, generationID string, in
 		return "", err
 	}
 	return fmt.Sprintf("/uploads/%s/%s/%s", constant.AIImageSubPath, userID, filename), nil
+}
+
+func (s *aiChatConfigService) saveImageStreamPartial(userID, generationID string, index int, imageB64 string) (string, error) {
+	data, ext, err := decodeImageData(imageB64)
+	if err != nil {
+		return "", err
+	}
+	if index < 0 {
+		index = 0
+	}
+	return s.saveGeneratedImage(userID, generationID+"-partial", index, ext, data)
 }
 
 func (s *aiChatConfigService) runVideoGeneration(ctx context.Context, provider *entity.AIVideoProvider, model *entity.AIVideoModel, generationID, userID string, req *schema.AIVideoGenerateReq) {
@@ -3767,7 +4072,7 @@ func normalizeBaseURL(raw string) (string, error) {
 	return raw, nil
 }
 
-func normalizeProviderBaseURL(ctx context.Context, raw string) (string, error) {
+func normalizeProviderBaseURL(_ context.Context, raw string) (string, error) {
 	normalized, err := normalizeBaseURL(raw)
 	if err != nil {
 		return "", err
@@ -3778,9 +4083,6 @@ func normalizeProviderBaseURL(ctx context.Context, raw string) (string, error) {
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return "", fmt.Errorf("base_url scheme is not allowed")
-	}
-	if err := validatePublicImageHost(ctx, parsed.Hostname()); err != nil {
-		return "", err
 	}
 	return normalized, nil
 }
@@ -3872,6 +4174,77 @@ func safeUpstreamError(status int, body []byte) error {
 		return fmt.Errorf("status %d", status)
 	}
 	return fmt.Errorf("status %d: %s", status, summary)
+}
+
+func doImageStreamUpstreamRequest(ctx context.Context, upstreamURL, apiKey string, bodyBytes []byte, generationID, endpoint string) (*http.Response, error) {
+	var lastErr error
+	for attempt := 1; attempt <= imageStreamRetryMaxAttempts; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(bodyBytes))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "text/event-stream, application/json")
+		httpReq.Header.Set("Cache-Control", "no-cache")
+
+		resp, err := imageStreamHTTPClient.Do(httpReq)
+		if err != nil {
+			lastErr = err
+			if attempt < imageStreamRetryMaxAttempts && isRetryableImageStreamRequestError(err) {
+				log.Warnf("ai image stream upstream request retry generation_id=%s endpoint=%s attempt=%d delay=%s error=%v", generationID, endpoint, attempt, imageStreamRetryDelay, err)
+				if sleepErr := sleepWithContext(ctx, imageStreamRetryDelay); sleepErr != nil {
+					return nil, sleepErr
+				}
+				continue
+			}
+			log.Errorf("ai image stream upstream request failed generation_id=%s endpoint=%s attempt=%d error=%v", generationID, endpoint, attempt, err)
+			return nil, err
+		}
+
+		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+			log.Infof("ai image stream upstream connected generation_id=%s endpoint=%s attempt=%d status=%d", generationID, endpoint, attempt, resp.StatusCode)
+			return resp, nil
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		lastErr = safeUpstreamError(resp.StatusCode, respBody)
+		if attempt < imageStreamRetryMaxAttempts && shouldRetryImageStreamStatus(resp.StatusCode, respBody) {
+			log.Warnf("ai image stream upstream retry generation_id=%s endpoint=%s attempt=%d status=%d delay=%s body=%s", generationID, endpoint, attempt, resp.StatusCode, imageStreamRetryDelay, safeUpstreamResponse(respBody))
+			if sleepErr := sleepWithContext(ctx, imageStreamRetryDelay); sleepErr != nil {
+				return nil, sleepErr
+			}
+			continue
+		}
+		log.Errorf("ai image stream upstream non-success generation_id=%s endpoint=%s attempt=%d status=%d body=%s", generationID, endpoint, attempt, resp.StatusCode, safeUpstreamResponse(respBody))
+		return nil, lastErr
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("image stream upstream request failed")
+}
+
+func shouldRetryImageStreamStatus(statusCode int, body []byte) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, 524:
+		return true
+	default:
+		return shouldRetryImageResponsesError(statusCode, body)
+	}
+}
+
+func isRetryableImageStreamRequestError(err error) bool {
+	var netErr net.Error
+	if stderrors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "connection reset") ||
+		strings.Contains(text, "connection refused") ||
+		strings.Contains(text, "unexpected eof") ||
+		strings.Contains(text, "stream error")
 }
 
 func buildImagePrompt(req *schema.AIImageGenerateReq) string {
@@ -4484,6 +4857,25 @@ func newVideoRestyClient(timeout time.Duration) *resty.Client {
 	return resty.New().SetRetryCount(1).SetTimeout(timeout)
 }
 
+func newImageRestyClient() *resty.Client {
+	return resty.New().SetRetryCount(1).SetTimeout(imageCreateTimeout)
+}
+
+func imageGenerationTimeoutError() string {
+	return fmt.Sprintf("图片生成请求超过 %s 未返回，请稍后重试", imageCreateTimeout)
+}
+
+func isTimedOutImageGeneration(record *entity.AIImageGeneration) bool {
+	if record == nil || record.Status != "generating" {
+		return false
+	}
+	startedAt := record.CreatedAt
+	if record.UpdatedAt.After(startedAt) {
+		startedAt = record.UpdatedAt
+	}
+	return !startedAt.IsZero() && time.Since(startedAt) > imageCreateTimeout
+}
+
 func summarizeReferenceImages(images []*preparedReferenceImage) string {
 	parts := make([]string, 0, len(images))
 	for index, image := range images {
@@ -4499,6 +4891,7 @@ func responseSnippet(body []byte) string {
 		return ""
 	}
 	text = base64DataPattern.ReplaceAllString(text, `"b64_json":"<omitted>"`)
+	text = imageResultPattern.ReplaceAllString(text, `"$1":"<omitted>"`)
 	text = dataURLPattern.ReplaceAllString(text, `data:<omitted>`)
 	if len(text) > limit {
 		return text[:limit] + "...(truncated)"

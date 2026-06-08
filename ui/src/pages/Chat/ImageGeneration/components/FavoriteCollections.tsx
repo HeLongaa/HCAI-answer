@@ -52,7 +52,7 @@ function FavoriteActionButton({
     <span className={wrapperClassName} {...tooltipState.handlers}>
       <button
         type="button"
-        className={className}
+        className={`hcai-favorite-action-button ${className}`}
         aria-label={tooltip}
         disabled={disabled}
         onClick={(e) => {
@@ -303,7 +303,7 @@ function FavoriteCollectionOverviewCard({
       </div>
       <article
         ref={cardRef}
-        className={`relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer touch-pan-y will-change-transform duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${!isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'} ${isSelected ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50' : 'border-gray-200 dark:border-white/[0.08] hover:border-gray-300 dark:hover:border-white/[0.18]'}`}
+        className={`hcai-favorite-collection-card relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer touch-pan-y will-change-transform duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${!isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'} ${isSelected ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50' : 'border-gray-200 dark:border-white/[0.08] hover:border-gray-300 dark:hover:border-white/[0.18]'}`}
         onClick={(e) => {
           if (Date.now() < suppressClickUntilRef.current || Date.now() < suppressSwipeClickUntilRef.current) {
             e.preventDefault()
@@ -348,7 +348,7 @@ function FavoriteCollectionOverviewCard({
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{card.tasks.length} 条任务</p>
             </div>
-            <div className="mt-auto flex items-center justify-end gap-1">
+            <div className="hcai-favorite-collection-actions mt-auto flex items-center justify-end gap-1">
               {!isVirtualAll && card.collection && (
                 <>
                   <FavoriteActionButton

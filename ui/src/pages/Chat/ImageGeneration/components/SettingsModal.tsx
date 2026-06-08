@@ -32,10 +32,6 @@ import {
   getClipboardFailureMessage,
 } from '../lib/clipboard';
 import {
-  requestBrowserNotificationPermission,
-  type BrowserNotificationPermissionResult,
-} from '../lib/browserNotification';
-import {
   DEFAULT_STREAM_PARTIAL_IMAGES,
   type ApiProfile,
   type AppSettings,
@@ -913,38 +909,6 @@ export default function SettingsModal() {
     timeoutInput,
   ]);
 
-  const showNotificationPermissionMessage = (
-    result: Exclude<BrowserNotificationPermissionResult, { ok: true }>,
-  ) => {
-    if (result.reason === 'unsupported') {
-      showToast('当前浏览器不支持系统通知', 'error');
-    } else if (result.reason === 'insecure') {
-      showToast('系统通知需要 HTTPS 或 localhost 安全上下文', 'error');
-    } else if (result.reason === 'denied') {
-      showToast(
-        '通知权限已被浏览器拒绝，请在地址栏左侧的网站设置中手动开启',
-        'error',
-      );
-    } else {
-      showToast('没有开启系统通知', 'info');
-    }
-  };
-
-  const toggleTaskCompletionNotification = async () => {
-    if (draft.taskCompletionNotification) {
-      commitSettings({ ...draft, taskCompletionNotification: false });
-      return;
-    }
-
-    const result = await requestBrowserNotificationPermission();
-    if (result.ok) {
-      commitSettings({ ...draft, taskCompletionNotification: true });
-      showToast('任务完成通知已开启', 'success');
-    } else {
-      showNotificationPermissionMessage(result);
-    }
-  };
-
   if (!showSettings) return null;
 
   const createNewProfile = () => {
@@ -1529,12 +1493,12 @@ export default function SettingsModal() {
                             clearInputAfterSubmit: !draft.clearInputAfterSubmit,
                           })
                         }
-                        className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.clearInputAfterSubmit ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                        className={`hcai-settings-switch relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.clearInputAfterSubmit ? 'is-on bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                         role="switch"
                         aria-checked={draft.clearInputAfterSubmit}
                         aria-label="提交任务后清空输入框">
                         <span
-                          className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.clearInputAfterSubmit ? 'translate-x-[14px]' : 'translate-x-[2px]'}`}
+                          className={`hcai-settings-switch-thumb inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.clearInputAfterSubmit ? 'translate-x-[14px]' : 'translate-x-[2px]'}`}
                         />
                       </button>
                     </div>
@@ -1595,117 +1559,6 @@ export default function SettingsModal() {
                       {zipDownloadRouteSummary}
                     </div>
                   </div>
-                  <div className="block">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="block text-sm text-gray-600 dark:text-gray-300">
-                        重启后加载上次的输入框
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          commitSettings({
-                            ...draft,
-                            persistInputOnRestart: !draft.persistInputOnRestart,
-                          })
-                        }
-                        className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.persistInputOnRestart ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                        role="switch"
-                        aria-checked={draft.persistInputOnRestart}
-                        aria-label="重启后加载上次的输入框">
-                        <span
-                          className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.persistInputOnRestart ? 'translate-x-[14px]' : 'translate-x-[2px]'}`}
-                        />
-                      </button>
-                    </div>
-                    <div
-                      data-selectable-text
-                      className="text-xs text-gray-500 dark:text-gray-500">
-                      关闭后，不再持久化提示词和参考图，下次启动会使用空输入框。
-                    </div>
-                  </div>
-                  <div className="block">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="block text-sm text-gray-600 dark:text-gray-300">
-                        成功任务仍然展示重试按钮
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          commitSettings({
-                            ...draft,
-                            alwaysShowRetryButton: !draft.alwaysShowRetryButton,
-                          })
-                        }
-                        className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.alwaysShowRetryButton ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                        role="switch"
-                        aria-checked={draft.alwaysShowRetryButton}
-                        aria-label="成功任务仍然展示重试按钮">
-                        <span
-                          className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.alwaysShowRetryButton ? 'translate-x-[14px]' : 'translate-x-[2px]'}`}
-                        />
-                      </button>
-                    </div>
-                    <div
-                      data-selectable-text
-                      className="text-xs text-gray-500 dark:text-gray-500">
-                      开启后，即使任务成功生成，也会在任务卡片和详情页显示重试按钮。
-                    </div>
-                  </div>
-                  <div className="block">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="block text-sm text-gray-600 dark:text-gray-300">
-                        任务完成后发送系统通知
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void toggleTaskCompletionNotification();
-                        }}
-                        className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.taskCompletionNotification ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                        role="switch"
-                        aria-checked={draft.taskCompletionNotification}
-                        aria-label="任务完成后发送系统通知">
-                        <span
-                          className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.taskCompletionNotification ? 'translate-x-[14px]' : 'translate-x-[2px]'}`}
-                        />
-                      </button>
-                    </div>
-                    <div
-                      data-selectable-text
-                      className="text-xs text-gray-500 dark:text-gray-500">
-                      开启后，画廊模式图像生成完成、Agent
-                      模式回复结束时，会发送浏览器系统通知。浏览器可能会请求通知权限或默认拒绝，请查看相关提示。
-                    </div>
-                  </div>
-                  <div className="block">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="block text-sm text-gray-600 dark:text-gray-300">
-                        发送消息后自动滚动到底部
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          commitSettings({
-                            ...draft,
-                            agentScrollToBottomAfterSubmit:
-                              !draft.agentScrollToBottomAfterSubmit,
-                          })
-                        }
-                        className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.agentScrollToBottomAfterSubmit ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                        role="switch"
-                        aria-checked={draft.agentScrollToBottomAfterSubmit}
-                        aria-label="发送消息后自动滚动到底部">
-                        <span
-                          className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.agentScrollToBottomAfterSubmit ? 'translate-x-[14px]' : 'translate-x-[2px]'}`}
-                        />
-                      </button>
-                    </div>
-                    <div
-                      data-selectable-text
-                      className="text-xs text-gray-500 dark:text-gray-500">
-                      开启后，在 Agent 模式发送消息成功后会自动滚动到对话底部。
-                    </div>
-                  </div>
                 </div>
               </div>
             </div>
@@ -1717,13 +1570,13 @@ export default function SettingsModal() {
         createPortal(
           <div
             data-no-drag-select
-            className="fixed inset-0 z-[1070] flex items-center justify-center p-4"
+            className="hcai-zip-route-manager-overlay fixed inset-0 z-[1070] flex items-center justify-center p-4"
             onClick={() => setShowZipDownloadRouteManager(false)}>
-            <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
+            <div className="hcai-zip-route-manager-backdrop absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
             <div
-              className="relative z-10 w-full max-w-md rounded-3xl bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] ring-1 ring-black/5 dark:ring-white/10 animate-confirm-in flex flex-col max-h-[85vh] sm:max-h-[90vh]"
+              className="hcai-zip-route-manager-panel relative z-10 w-full max-w-md rounded-3xl bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] ring-1 ring-black/5 dark:ring-white/10 animate-confirm-in flex flex-col max-h-[85vh] sm:max-h-[90vh]"
               onClick={(e) => e.stopPropagation()}>
-              <div className="shrink-0 p-6 pb-2">
+              <div className="hcai-zip-route-manager-head shrink-0 p-6 pb-2">
                 <div className="mb-3 flex items-center justify-between gap-4">
                   <h3 className="text-base font-bold text-gray-800 dark:text-gray-100">
                     使用压缩包进行批量下载
@@ -1731,7 +1584,7 @@ export default function SettingsModal() {
                   <button
                     type="button"
                     onClick={() => setShowZipDownloadRouteManager(false)}
-                    className="shrink-0 rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+                    className="hcai-zip-route-manager-close shrink-0 rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
                     aria-label="关闭">
                     <CloseIcon className="h-5 w-5" />
                   </button>
@@ -1747,7 +1600,7 @@ export default function SettingsModal() {
 
               <div
                 ref={zipDownloadRouteScrollBoundaryRef}
-                className="flex-1 overflow-y-auto px-6 space-y-3 custom-scrollbar min-h-0 py-2">
+                className="hcai-zip-route-manager-list flex-1 overflow-y-auto px-6 space-y-3 custom-scrollbar min-h-0 py-2">
                 {ZIP_DOWNLOAD_ROUTE_OPTIONS.map((option) => {
                   const isChecked = draft.zipDownloadRoutes.includes(
                     option.route,
@@ -1766,7 +1619,7 @@ export default function SettingsModal() {
                         event.preventDefault();
                         setZipDownloadRouteEnabled(option.route, !isChecked);
                       }}
-                      className={`cursor-pointer rounded-2xl border p-3.5 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${isChecked ? 'border-blue-500/30 bg-blue-50/50 dark:border-blue-400/30 dark:bg-blue-500/[0.05]' : 'border-gray-100 bg-gray-50/70 hover:bg-gray-100/70 dark:border-white/[0.06] dark:bg-white/[0.03] dark:hover:bg-white/[0.05]'}`}>
+                      className={`hcai-zip-route-option cursor-pointer rounded-2xl border p-3.5 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${isChecked ? 'is-checked border-blue-500/30 bg-blue-50/50 dark:border-blue-400/30 dark:bg-blue-500/[0.05]' : 'border-gray-100 bg-gray-50/70 hover:bg-gray-100/70 dark:border-white/[0.06] dark:bg-white/[0.03] dark:hover:bg-white/[0.05]'}`}>
                       <div onClick={(event) => event.stopPropagation()}>
                         <Checkbox
                           checked={isChecked}
@@ -1790,11 +1643,11 @@ export default function SettingsModal() {
                 })}
               </div>
 
-              <div className="shrink-0 p-6 pt-4 flex gap-2">
+              <div className="hcai-zip-route-manager-footer shrink-0 p-6 pt-4 flex gap-2">
                 <button
                   type="button"
                   onClick={() => setShowZipDownloadRouteManager(false)}
-                  className="flex-1 rounded-lg bg-blue-500 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
+                  className="hcai-zip-route-manager-done flex-1 rounded-lg bg-blue-500 py-2 text-sm font-medium text-white transition hover:bg-blue-600">
                   完成
                 </button>
               </div>

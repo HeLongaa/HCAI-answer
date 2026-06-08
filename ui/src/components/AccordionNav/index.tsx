@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import React, { FC, useEffect, useState } from 'react';
+import React, { FC, useEffect, useMemo, useState } from 'react';
 import { Accordion, Nav } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useMatch, NavLink } from 'react-router-dom';
@@ -54,6 +54,10 @@ function MenuNode({
   const { t } = useTranslation('translation', { keyPrefix: 'nav_menus' });
   const isLeaf = !menu.children || menu.children.length === 0;
   const href = isLeaf ? `${path}${menu.path || ''}` : '#';
+  const isActive =
+    activeKey === menu.path ||
+    (isLeaf && menu.path && activeKey.startsWith(`${menu.path}/`)) ||
+    (menu.pathPrefix && activeKey.startsWith(menu.pathPrefix));
 
   return (
     <Nav.Item key={menu.path} className="w-100">
@@ -69,11 +73,7 @@ function MenuNode({
             'text-nowrap d-flex flex-nowrap align-items-center w-100',
             {
               expanding,
-              active:
-                activeKey === menu.path ||
-                (menu.path && activeKey.startsWith(`${menu.path}/`)) ||
-                // if pathPrefix is set, activate when activeKey starts with the pathPrefix
-                (menu.pathPrefix && activeKey.startsWith(menu.pathPrefix)),
+              active: isActive,
             },
           )}>
           {menu?.icon && <Icon name={menu.icon} className="me-2" />}
@@ -100,10 +100,7 @@ function MenuNode({
             'text-nowrap d-flex flex-nowrap align-items-center w-100',
             {
               expanding,
-              active:
-                activeKey === menu.path ||
-                (menu.path && activeKey.startsWith(`${menu.path}/`)) ||
-                (menu.pathPrefix && activeKey.startsWith(menu.pathPrefix)),
+              active: isActive,
             },
           )}>
           {menu?.icon && <Icon name={menu.icon} className="me-2" />}
@@ -148,7 +145,23 @@ const AccordionNav: FC<AccordionProps> = ({ menus = [], path = '/' }) => {
   const navigate = useNavigate();
   const pathMatch = useMatch(`${path}*`);
   // auto set menu fields
-  menus.forEach((m) => {
+  const normalizedMenus = useMemo(() => {
+    return menus.map((menu) => {
+      const nextMenu = {
+        ...menu,
+        path: menu.path || menu.name,
+        children: Array.isArray(menu.children) ? menu.children : [],
+      };
+      nextMenu.children = nextMenu.children.map((child) => ({
+        ...child,
+        path: child.path || child.name,
+        children: Array.isArray(child.children) ? child.children : [],
+      }));
+      return nextMenu;
+    });
+  }, [menus]);
+
+  normalizedMenus.forEach((m) => {
     if (!m.path) {
       m.path = m.name;
     }
@@ -166,7 +179,8 @@ const AccordionNav: FC<AccordionProps> = ({ menus = [], path = '/' }) => {
   });
 
   const splat = pathMatch && pathMatch.params['*'];
-  let activeKey: string = menus[0]?.path || menus[0]?.name || '';
+  let activeKey: string =
+    normalizedMenus[0]?.path || normalizedMenus[0]?.name || '';
 
   if (splat) {
     activeKey = splat;
@@ -174,7 +188,7 @@ const AccordionNav: FC<AccordionProps> = ({ menus = [], path = '/' }) => {
 
   const getOpenKey = () => {
     let openKey = '';
-    menus.forEach((li) => {
+    normalizedMenus.forEach((li) => {
       if (li.children && li.children.length > 0) {
         const matchedChild = li.children.find((el) => {
           // exact match or path prefix match
@@ -207,11 +221,11 @@ const AccordionNav: FC<AccordionProps> = ({ menus = [], path = '/' }) => {
   };
   useEffect(() => {
     setOpenKey(getOpenKey());
-  }, [activeKey, menus]);
+  }, [activeKey]);
   return (
     <Accordion activeKey={openKey} flush id="answerAccordion">
       <Nav variant="pills" className="flex-column" activeKey={activeKey}>
-        {menus.map((li) => {
+        {normalizedMenus.map((li) => {
           return (
             <MenuNode
               menu={li}

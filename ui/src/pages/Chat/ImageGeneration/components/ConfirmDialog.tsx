@@ -95,7 +95,7 @@ export default function ConfirmDialog() {
     >
       <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
       <div
-        className="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-sm w-full p-6 z-10 ring-1 ring-black/5 dark:ring-white/10 animate-confirm-in"
+        className="hcai-confirm-dialog relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-sm w-full p-6 z-10 ring-1 ring-black/5 dark:ring-white/10 animate-confirm-in"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="mb-2 flex items-center gap-2 text-base font-bold text-gray-800 dark:text-gray-100">
@@ -135,7 +135,7 @@ export default function ConfirmDialog() {
                   setConfirmDialog(null)
                 }}
                 disabled={!canConfirm}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${getActionButtonClass(button.tone)}`}
+                className={`hcai-confirm-dialog-button hcai-confirm-dialog-button-${button.tone ?? 'primary'} flex-1 py-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${getActionButtonClass(button.tone)}`}
               >
                 {button.label}
               </button>
@@ -146,7 +146,7 @@ export default function ConfirmDialog() {
             {confirmDialog.showCancel !== false && (
               <button
                 onClick={handleCancel}
-                className="flex-1 py-2 rounded-lg border border-gray-200 dark:border-white/[0.08] text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.06] transition"
+                className="hcai-confirm-dialog-button hcai-confirm-dialog-button-secondary flex-1 py-2 rounded-lg border border-gray-200 dark:border-white/[0.08] text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.06] transition"
               >
                 {cancelText}
               </button>
@@ -158,7 +158,7 @@ export default function ConfirmDialog() {
                 setConfirmDialog(null)
               }}
               disabled={!canConfirm}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${confirmClassName}`}
+              className={`hcai-confirm-dialog-button hcai-confirm-dialog-button-${confirmTone === 'danger' || confirmTone === 'warning' ? confirmTone : 'primary'} flex-1 py-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${confirmClassName}`}
             >
               {confirmText}
             </button>

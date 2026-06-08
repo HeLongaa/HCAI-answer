@@ -25,6 +25,7 @@ import {
   useCallback,
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -544,7 +545,7 @@ const Chat: FC = () => {
     refreshConversations().catch(() => undefined);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const urlWorkspace = getWorkspaceFromSearchParams(searchParams);
     if (urlWorkspace) {
       Storage.set(CHAT_WORKSPACE_STORAGE_KEY, urlWorkspace);

@@ -470,9 +470,6 @@ export default function AgentWorkspace() {
   const setMaskDraft = useStore((s) => s.setMaskDraft);
   const clearMaskDraft = useStore((s) => s.clearMaskDraft);
   const setAppMode = useStore((s) => s.setAppMode);
-  const agentScrollToBottomAfterSubmit = useStore(
-    (s) => s.settings.agentScrollToBottomAfterSubmit,
-  );
   const agentEditingRoundId = useStore((s) => s.agentEditingRoundId);
   const setAgentEditingRoundId = useStore((s) => s.setAgentEditingRoundId);
   const setActiveAgentRoundId = useStore((s) => s.setActiveAgentRoundId);
@@ -630,7 +627,6 @@ export default function AgentWorkspace() {
     const previous = autoScrollStateRef.current;
     const shouldScroll =
       appMode === 'agent' &&
-      agentScrollToBottomAfterSubmit &&
       previous.conversationId === conversationId &&
       lastMessage?.role === 'user' &&
       lastUserMessageSignature != null &&
@@ -646,7 +642,6 @@ export default function AgentWorkspace() {
     return () => window.cancelAnimationFrame(firstFrame);
   }, [
     activeMessages,
-    agentScrollToBottomAfterSubmit,
     appMode,
     conversation?.id,
     jumpToAgentBottom,

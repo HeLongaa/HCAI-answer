@@ -30,7 +30,8 @@ import {
 
 import classnames from 'classnames';
 
-import { userCenter, floppyNavigation, isLight } from '@/utils';
+import { userCenter, floppyNavigation, isLight, Storage } from '@/utils';
+import { CHAT_WORKSPACE_STORAGE_KEY } from '@/common/constants';
 import {
   loggedUserInfoStore,
   siteInfoStore,
@@ -171,6 +172,11 @@ const Header: FC = () => {
 
   let navbarStyle = 'theme-light';
   let themeMode = 'light';
+  const storedChatWorkspace = Storage.get(CHAT_WORKSPACE_STORAGE_KEY);
+  const workbenchPath =
+    storedChatWorkspace === 'image' || storedChatWorkspace === 'video'
+      ? `/?workspace=${storedChatWorkspace}`
+      : '/';
   const { theme, theme_config, layout } = themeSettingStore((_) => _);
   if (theme_config?.[theme]?.navbar_style) {
     // const color = theme_config[theme].navbar_style.startsWith('#')
@@ -223,7 +229,7 @@ const Header: FC = () => {
         />
 
         <Navbar.Brand
-          to="/"
+          to={workbenchPath}
           as={Link}
           className={classnames('lh-1 me-0 me-sm-5 p-0 nav-text', {
             'side-nav-brand-hidden': isSideNavPage,
@@ -245,7 +251,7 @@ const Header: FC = () => {
           ref={headerSearchRef}>
           <div className="header-segmented-nav" aria-label="Primary navigation">
             <NavLink
-              to="/"
+              to={workbenchPath}
               end
               className={classnames('segment-item', {
                 active: location.pathname === '/',

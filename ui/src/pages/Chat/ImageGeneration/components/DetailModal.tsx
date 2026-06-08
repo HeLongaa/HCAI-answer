@@ -96,6 +96,7 @@ export default function DetailModal() {
     [tasks, detailTaskId],
   );
   const streamPreviewItems = useMemo(() => {
+    const persistedPreviewUrls = task?.streamPartialImageUrls ?? [];
     const slotEntries = streamPreviewSlots
       ? Object.entries(streamPreviewSlots)
           .filter(([, src]) => Boolean(src))
@@ -103,6 +104,7 @@ export default function DetailModal() {
       : [];
     const count = Math.max(
       task?.status === 'running' ? task.params.n : 0,
+      persistedPreviewUrls.length,
       slotEntries.length
         ? Math.max(...slotEntries.map(([key]) => Number(key) + 1))
         : 0,
@@ -114,9 +116,12 @@ export default function DetailModal() {
 
     return Array.from({ length: count }, (_, index) => ({
       key: String(index),
-      src: byIndex.get(index) ?? (index === 0 ? streamPreviewSrc : ''),
+      src:
+        byIndex.get(index) ??
+        persistedPreviewUrls[index] ??
+        (index === 0 ? streamPreviewSrc : ''),
     }));
-  }, [task?.params.n, task?.status, streamPreviewSlots, streamPreviewSrc]);
+  }, [task?.params.n, task?.status, task?.streamPartialImageUrls, streamPreviewSlots, streamPreviewSrc]);
   const activeStreamPreviewSrc = streamPreviewItems[imageIndex]?.src || '';
   const persistedOutputLen = Math.max(
     task?.outputImages?.length ?? 0,
@@ -327,6 +332,8 @@ export default function DetailModal() {
   const streamPreviewLen = streamPreviewItems.length;
   const currentStreamPreviewSrc = activeStreamPreviewSrc;
   const streamPartialImageIds = task.streamPartialImageIds ?? [];
+  const isWaitingForStreamPreview =
+    task.status === 'running' && (task.streamPartialImages || 0) > 0;
 
   const formatTime = (ts: number | null) => {
     if (!ts) return '';
@@ -693,11 +700,9 @@ export default function DetailModal() {
                         />
                       </svg>
                     )}
-                    {streamPreviewLoaded && (
-                      <span className="absolute top-4 right-4 flex items-center gap-1 rounded bg-blue-500 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
-                        流式预览
-                      </span>
-                    )}
+                    <span className="hcai-stream-preview-badge absolute top-4 right-4 flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
+                      流式预览
+                    </span>
                     {streamPreviewLen > 1 && (
                       <>
                         <button
@@ -747,24 +752,31 @@ export default function DetailModal() {
                   </>
                 )}
                 {task.status === 'running' && streamPreviewLen === 0 && (
-                  <svg
-                    className="w-10 h-10 text-blue-400 animate-spin"
-                    fill="none"
-                    viewBox="0 0 24 24">
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
+                  <div className="flex flex-col items-center gap-3">
+                    <svg
+                      className="w-10 h-10 text-blue-400 animate-spin"
+                      fill="none"
+                      viewBox="0 0 24 24">
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      />
+                    </svg>
+                    {isWaitingForStreamPreview && (
+                      <span className="rounded-full bg-black/45 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
+                        等待流式预览
+                      </span>
+                    )}
+                  </div>
                 )}
               </>
             )}
@@ -955,8 +967,9 @@ export default function DetailModal() {
                 )}
                 {task.prompt && !showPendingPrompt && (
                   <button
+                    type="button"
                     onClick={handleCopyPrompt}
-                    className="p-1 rounded text-gray-400 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-white/[0.06] transition"
+                    className="hcai-detail-modal-inline-button p-1 rounded text-gray-400 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-white/[0.06] transition"
                     title="复制提示词">
                     <CopyIcon className="h-4 w-4" />
                   </button>
@@ -965,7 +978,7 @@ export default function DetailModal() {
                   <span className="relative inline-flex">
                     <button
                       type="button"
-                      className="p-1 rounded text-amber-500 hover:bg-amber-50 dark:text-yellow-300 dark:hover:bg-yellow-500/10 transition"
+                      className="hcai-detail-modal-inline-button hcai-detail-modal-inline-button-warning p-1 rounded text-amber-500 hover:bg-amber-50 dark:text-yellow-300 dark:hover:bg-yellow-500/10 transition"
                       onClick={handleShowPromptWarning}
                       aria-label="提示词已被改写">
                       <svg
@@ -1026,8 +1039,9 @@ export default function DetailModal() {
                     </h3>
                     {allInputImageIds.length > 0 && (
                       <button
+                        type="button"
                         onClick={handleCopyInputImage}
-                        className="p-1 rounded text-gray-400 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-white/[0.06] transition"
+                        className="hcai-detail-modal-inline-button p-1 rounded text-gray-400 hover:bg-gray-100 dark:text-gray-500 dark:hover:bg-white/[0.06] transition"
                         title="复制参考图">
                         <CopyIcon className="h-4 w-4" />
                       </button>

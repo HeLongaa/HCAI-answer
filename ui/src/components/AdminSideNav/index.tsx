@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { FC, useEffect } from 'react';
+import { FC, useEffect, useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -44,22 +44,25 @@ const AdminSideNav: FC<IProps> = ({ showBrand = true }) => {
       have_config: true,
     });
 
-  const menus = cloneDeep(ADMIN_NAV_MENUS) as MenuItem[];
-  if (configurablePlugins && configurablePlugins.length > 0) {
-    menus.forEach((item) => {
-      if (item.name === 'plugins' && item.children) {
-        item.children = [
-          ...item.children,
-          ...configurablePlugins.map(
-            (plugin): MenuItem => ({
-              name: plugin.slug_name,
-              displayName: plugin.name,
-            }),
-          ),
-        ];
-      }
-    });
-  }
+  const menus = useMemo(() => {
+    const nextMenus = cloneDeep(ADMIN_NAV_MENUS) as MenuItem[];
+    if (configurablePlugins && configurablePlugins.length > 0) {
+      nextMenus.forEach((item) => {
+        if (item.name === 'plugins' && item.children) {
+          item.children = [
+            ...item.children,
+            ...configurablePlugins.map(
+              (plugin): MenuItem => ({
+                name: plugin.slug_name,
+                displayName: plugin.name,
+              }),
+            ),
+          ];
+        }
+      });
+    }
+    return nextMenus;
+  }, [configurablePlugins]);
 
   const observePlugins = (evt) => {
     if (evt.data.msgType === 'refreshConfigurablePlugins') {

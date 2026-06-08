@@ -32,7 +32,12 @@ import {
   Table,
   Tabs,
 } from 'react-bootstrap';
-import { useSearchParams } from 'react-router-dom';
+import {
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 
 import type * as Type from '@/common/interface';
 import { useToast } from '@/hooks';
@@ -268,8 +273,13 @@ const formatDateTime = (value?: number) => {
 
 const AiChatConfig = () => {
   const toast = useToast();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tabFromURL = searchParams.get('tab') || 'providers';
+  const location = useLocation();
+  const navigate = useNavigate();
+  const params = useParams<{ tab?: string }>();
+  const [searchParams] = useSearchParams();
+  const tabFromPath = params.tab || '';
+  const legacyTab = searchParams.get('tab') || '';
+  const activeTab = tabKeys.includes(tabFromPath) ? tabFromPath : 'providers';
   const [providers, setProviders] = useState<Type.AdminAiProvider[]>([]);
   const [mappings, setMappings] = useState<Type.AdminAiModelMapping[]>([]);
   const [plans, setPlans] = useState<Type.AiSubscriptionPlan[]>([]);
@@ -299,10 +309,9 @@ const AiChatConfig = () => {
   const [generatedCodes, setGeneratedCodes] = useState<
     Type.AiSubscriptionRedeemCode[]
   >([]);
-  const [activeTab, setActiveTab] = useState(
-    tabKeys.includes(tabFromURL) ? tabFromURL : 'providers',
-  );
   const [testingProvider, setTestingProvider] =
+    useState<Type.AdminAiProvider | null>(null);
+  const [modelListProvider, setModelListProvider] =
     useState<Type.AdminAiProvider | null>(null);
   const [testingModelID, setTestingModelID] = useState('');
   const [testingResult, setTestingResult] =
@@ -383,10 +392,21 @@ const AiChatConfig = () => {
   }, []);
 
   useEffect(() => {
-    if (tabKeys.includes(tabFromURL) && tabFromURL !== activeTab) {
-      setActiveTab(tabFromURL);
+    if (!tabFromPath && legacyTab && tabKeys.includes(legacyTab)) {
+      navigate(`/admin/ai-chat-config/${legacyTab}`, { replace: true });
+      return;
     }
-  }, [activeTab, tabFromURL]);
+    if (
+      !tabFromPath &&
+      location.pathname.replace(/\/+$/, '') === '/admin/ai-chat-config'
+    ) {
+      navigate('/admin/ai-chat-config/providers', { replace: true });
+      return;
+    }
+    if (tabFromPath && !tabKeys.includes(tabFromPath)) {
+      navigate('/admin/ai-chat-config/providers', { replace: true });
+    }
+  }, [legacyTab, location.pathname, navigate, tabFromPath]);
 
   const showSuccess = (msg: string) => {
     toast.onShow({ msg, variant: 'success' });
@@ -434,18 +454,49 @@ const AiChatConfig = () => {
     }
   };
 
+  const refreshProviderModels = async (
+    providerID: number,
+    showToast = true,
+  ) => {
+    setFetchingProviderID(providerID);
+    setError('');
+    try {
+      const models = await fetchAiChatProviderModels(providerID);
+      if (showToast) {
+        showSuccess('模型列表已更新');
+      }
+      return models || [];
+    } catch (err: any) {
+      const msg = err?.msg || '获取模型列表失败';
+      setError(msg);
+      throw err;
+    } finally {
+      setFetchingProviderID(0);
+    }
+  };
+
   const submitProvider = async (evt: FormEvent) => {
     evt.preventDefault();
     setError('');
     try {
       if (providerForm.id) {
         await updateAiChatProvider(providerForm.id, providerForm);
+        setProviderForm(providerInit);
+        showSuccess('Provider 已保存');
+        await loadAll();
       } else {
-        await createAiChatProvider(providerForm);
+        const provider = await createAiChatProvider(providerForm);
+        setProviderForm(providerInit);
+        try {
+          const models = await refreshProviderModels(provider.id, false);
+          showSuccess(`Provider 已保存，已获取 ${models.length} 个模型`);
+          await loadAll();
+        } catch (fetchErr: any) {
+          showSuccess('Provider 已保存');
+          setError(fetchErr?.msg || 'Provider 已保存，但自动获取模型列表失败');
+          await loadAll();
+        }
       }
-      setProviderForm(providerInit);
-      showSuccess('Provider 已保存');
-      await loadAll();
     } catch (err: any) {
       setError(err?.msg || 'Provider 保存失败');
     }
@@ -664,16 +715,11 @@ const AiChatConfig = () => {
   };
 
   const fetchModels = async (providerID: number) => {
-    setFetchingProviderID(providerID);
-    setError('');
     try {
-      await fetchAiChatProviderModels(providerID);
-      showSuccess('模型列表已更新');
+      await refreshProviderModels(providerID);
       await loadAll();
-    } catch (err: any) {
-      setError(err?.msg || '获取模型列表失败');
-    } finally {
-      setFetchingProviderID(0);
+    } catch {
+      // Error has already been surfaced by refreshProviderModels.
     }
   };
 
@@ -745,15 +791,7 @@ const AiChatConfig = () => {
         ) : null}
       </h3>
       {error ? <Alert variant="danger">{error}</Alert> : null}
-      <Tabs
-        activeKey={activeTab}
-        onSelect={(key) => {
-          if (key) {
-            setActiveTab(key);
-            setSearchParams({ tab: key });
-          }
-        }}
-        className="ai-chat-config-tabs mb-4">
+      <Tabs activeKey={activeTab} className="ai-chat-config-tabs d-none">
         <Tab eventKey="providers" title="Provider 管理">
           <Card className="mb-4">
             <Card.Body>
@@ -896,7 +934,16 @@ const AiChatConfig = () => {
                       {provider.supports_stream ? '支持' : '不支持'}
                     </Badge>
                   </td>
-                  <td>{provider.models?.length || 0}</td>
+                  <td>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="link"
+                      className="ai-chat-config-model-count-btn"
+                      onClick={() => setModelListProvider(provider)}>
+                      {provider.models?.length || 0}
+                    </Button>
+                  </td>
                   <td className="ai-chat-config-action-cell">
                     <Button
                       size="sm"
@@ -2754,6 +2801,61 @@ const AiChatConfig = () => {
           </Card>
         </Tab>
       </Tabs>
+      <Modal
+        show={!!modelListProvider}
+        onHide={() => setModelListProvider(null)}
+        centered
+        scrollable
+        size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>
+            模型列表
+            {modelListProvider?.name ? ` - ${modelListProvider.name}` : ''}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {modelListProvider?.models?.length ? (
+            <Table responsive hover size="sm" className="mb-0">
+              <thead>
+                <tr>
+                  <th>模型 ID</th>
+                  <th>状态</th>
+                  <th>获取时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {modelListProvider.models.map((model) => (
+                  <tr key={model.id || model.provider_model_id}>
+                    <td
+                      className="ai-chat-config-code-cell"
+                      title={model.provider_model_id}>
+                      {model.provider_model_id}
+                    </td>
+                    <td>
+                      <Badge bg={model.enabled ? 'success' : 'secondary'}>
+                        {model.enabled ? '启用' : '禁用'}
+                      </Badge>
+                    </td>
+                    <td>{formatDateTime(model.fetched_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          ) : (
+            <Alert variant="secondary" className="mb-0">
+              暂无模型，请先获取模型列表。
+            </Alert>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button
+            type="button"
+            variant="link"
+            onClick={() => setModelListProvider(null)}>
+            关闭
+          </Button>
+        </Modal.Footer>
+      </Modal>
       <Modal show={!!testingProvider} onHide={closeTestProvider} centered>
         <Modal.Header closeButton={!testing}>
           <Modal.Title>测试模型</Modal.Title>
