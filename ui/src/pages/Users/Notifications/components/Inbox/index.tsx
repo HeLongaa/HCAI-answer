@@ -26,6 +26,26 @@ import isEmpty from 'lodash/isEmpty';
 
 import { FormatTime, Empty } from '@/components';
 
+const taskNotificationActionText = {
+  'notification.action.task_submitted_for_review': '提交了新的任务需求',
+  'notification.action.task_review_approved': '审核通过了你的任务需求',
+  'notification.action.task_review_rejected': '驳回了你的任务需求',
+  'notification.action.task_claimed': '领取了你的任务',
+  'notification.action.task_claimed_admin': '领取了任务',
+  'notification.action.task_submitted_for_acceptance': '提交了任务验收',
+  'notification.action.task_acceptance_approved': '通过了你的任务验收',
+  'notification.action.task_acceptance_rejected': '退回了你的任务验收',
+};
+
+const taskReviewNotificationUrls = {
+  'notification.action.task_submitted_for_review': '/review?type=task_request',
+  'notification.action.task_review_approved': '/tasks',
+  'notification.action.task_review_rejected': '/tasks',
+  'notification.action.task_claimed_admin': '/review?type=task_in_progress',
+  'notification.action.task_submitted_for_acceptance':
+    '/review?type=task_submission',
+};
+
 const Inbox = ({ data, handleReadNotification }) => {
   const { t } = useTranslation('translation', { keyPrefix: 'notifications' });
   if (!data) {
@@ -39,6 +59,9 @@ const Inbox = ({ data, handleReadNotification }) => {
       {data.map((item) => {
         const { comment, question, answer } =
           item?.object_info?.object_map || {};
+        const notificationAction =
+          taskNotificationActionText[item.notification_action] ||
+          item.notification_action;
         let url = '';
         switch (item.object_info.object_type) {
           case 'question':
@@ -49,6 +72,11 @@ const Inbox = ({ data, handleReadNotification }) => {
             break;
           case 'comment':
             url = `/questions/${question}/${answer}?commentId=${comment}`;
+            break;
+          case 'task':
+            url =
+              taskReviewNotificationUrls[item.notification_action] ||
+              `/tasks/${item.object_info.object_id}`;
             break;
           default:
             url = '';
@@ -69,7 +97,7 @@ const Inbox = ({ data, handleReadNotification }) => {
                 // someone for anonymous user display
                 <span>{item.user_info?.display_name || t('someone')} </span>
               )}
-              {item.notification_action}{' '}
+              {notificationAction}{' '}
               <Link to={url} onClick={() => handleReadNotification(item.id)}>
                 {item.object_info.title}
               </Link>

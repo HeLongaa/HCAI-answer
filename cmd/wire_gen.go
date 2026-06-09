@@ -215,7 +215,7 @@ func initApplication(debug bool, serverConf *conf.Server, dbConf *data.Database,
 	collectionGroupRepo := collection.NewCollectionGroupRepo(dataData)
 	collectionService := collection2.NewCollectionService(collectionRepo, collectionGroupRepo, questionCommon)
 	collectionController := controller.NewCollectionController(collectionService)
-	taskSquareService := task_square.NewTaskSquareService(dataData, uniqueIDRepo, realtimeService, siteInfoCommonService)
+	taskSquareService := task_square.NewTaskSquareService(dataData, uniqueIDRepo, realtimeService, siteInfoCommonService, userRoleRelService, emailService, userNotificationConfigRepo)
 	questionController := controller.NewQuestionController(questionService, answerService, rankService, siteInfoCommonService, captchaService, rateLimitMiddleware, taskSquareService, realtimeService)
 	answerController := controller.NewAnswerController(answerService, rankService, captchaService, siteInfoCommonService, rateLimitMiddleware)
 	searchParser := search_parser.NewSearchParser(tagCommonService, userCommon)

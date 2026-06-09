@@ -143,3 +143,18 @@ type NewQuestionTemplateData struct {
 	Tags           string
 	UnsubscribeUrl string
 }
+
+type TaskNotificationTemplateRawData struct {
+	ActionTitle string
+	TaskTitle   string
+	TaskURL     string
+	Summary     string
+}
+
+type TaskNotificationTemplateData struct {
+	SiteName    string
+	ActionTitle string
+	TaskTitle   string
+	TaskURL     string
+	Summary     string
+}

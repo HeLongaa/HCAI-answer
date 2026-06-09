@@ -26,6 +26,7 @@ func newTaskSquareTestService(t *testing.T) (*TaskSquareService, *xorm.Engine) {
 		new(entity.User),
 		new(entity.UserPointAccount),
 		new(entity.PointTransaction),
+		new(entity.Notification),
 		new(entity.Question),
 		new(entity.FeaturedPost),
 		new(entity.Tag),
@@ -33,7 +34,7 @@ func newTaskSquareTestService(t *testing.T) (*TaskSquareService, *xorm.Engine) {
 	); err != nil {
 		t.Fatalf("sync task square tables: %v", err)
 	}
-	return NewTaskSquareService(&data.Data{DB: engine}, &testUniqueIDRepo{}, nil, &testSiteInfoService{}), engine
+	return NewTaskSquareService(&data.Data{DB: engine}, &testUniqueIDRepo{}, nil, &testSiteInfoService{}, nil, nil, nil), engine
 }
 
 type testUniqueIDRepo struct {
@@ -322,7 +323,7 @@ func TestTaskPrivateFieldsOnlyVisibleToOwnerAssigneeAndAdmin(t *testing.T) {
 		t.Fatalf("visitor can view private fields")
 	}
 	if visitorResp.Description != "" || visitorResp.SubmissionRequirements != "" ||
-		len(visitorResp.Attachments) != 0 || visitorResp.ReviewComment != "" ||
+		len(visitorResp.Attachments) != 0 || visitorResp.ReviewComment != task.ReviewComment ||
 		visitorResp.Submission != nil {
 		t.Fatalf("visitor private fields were not redacted: %+v", visitorResp)
 	}

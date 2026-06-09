@@ -73,6 +73,7 @@ export interface TaskItem {
   user_id: string;
   user_display_name: string;
   reviewer_id: string;
+  reviewer_display_name: string;
   assignee_id: string;
   assignee_display_name: string;
   title: string;

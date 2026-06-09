@@ -86,12 +86,6 @@ const TaskDetailContent: FC<{ task: TaskItem }> = ({ task }) => {
             <strong>附件/链接</strong>
             {renderTaskLinks(task.attachments)}
           </div>
-          <div className="task-square-detail-section">
-            <strong>
-              {task.status === 'rejected' ? '拒绝理由' : '审核说明'}
-            </strong>
-            {renderTaskText(task.review_comment)}
-          </div>
           {task.submission ? (
             <>
               <div className="task-square-detail-section task-square-detail-section-wide">
@@ -115,16 +109,19 @@ const TaskDetailContent: FC<{ task: TaskItem }> = ({ task }) => {
         </>
       ) : (
         <div className="task-square-private-notice">
-          需求详情、附件/链接和审核说明仅发布人、领取人、管理员或版主可见。
+          需求详情和附件/链接仅发布人、领取人、管理员或版主可见。
         </div>
       )}
+      <div className="task-square-detail-section">
+        <strong>{task.status === 'rejected' ? '拒绝理由' : '审核说明'}</strong>
+        {renderTaskText(task.review_comment)}
+      </div>
       <div className="task-square-detail-section task-square-detail-meta">
         <strong>后台记录</strong>
-        <span>任务 ID：{task.id}</span>
         <span>
           审核人：
           {task.reviewer_id && task.reviewer_id !== '0'
-            ? task.reviewer_id
+            ? task.reviewer_display_name || task.reviewer_id
             : '暂无'}
         </span>
         {task.claimed_at ? (
@@ -164,10 +161,18 @@ const Tasks: FC = () => {
 
   usePageTags({ title: '任务广场' });
 
+  const canClaimTask = (task: TaskItem) => {
+    return task.status === 'open' && task.user_id !== currentUserID;
+  };
+
   const handleClaim = async (task: TaskItem) => {
+    if (!canClaimTask(task)) {
+      return;
+    }
     try {
       await claimTask(task.id);
       toastStore.getState().show({ msg: '领取成功', variant: 'success' });
+      setDetailTarget(null);
       mutate();
     } catch (err: any) {
       toastStore.getState().show({
@@ -193,6 +198,20 @@ const Tasks: FC = () => {
       toastStore
         .getState()
         .show({ msg: '提交成功，等待验收', variant: 'success' });
+      mutate(
+        (current) =>
+          current
+            ? {
+                ...current,
+                list: current.list.map((task) =>
+                  task.id === submitTarget.id
+                    ? { ...task, status: 'submitted' as const }
+                    : task,
+                ),
+              }
+            : current,
+        false,
+      );
       setSubmitTarget(null);
       setSubmitContent('');
       setSubmitLinks('');
@@ -335,7 +354,7 @@ const Tasks: FC = () => {
                   <div
                     className="task-square-card-actions"
                     onClick={stopTaskActionPropagation}>
-                    {task.status === 'open' ? (
+                    {canClaimTask(task) ? (
                       <Button size="sm" onClick={() => handleClaim(task)}>
                         领取
                       </Button>
@@ -439,7 +458,7 @@ const Tasks: FC = () => {
               <Button variant="link" onClick={() => setDetailTarget(null)}>
                 关闭
               </Button>
-              {detailTarget.status === 'open' ? (
+              {canClaimTask(detailTarget) ? (
                 <Button onClick={() => handleClaim(detailTarget)}>领取</Button>
               ) : null}
               {canSubmitTask(detailTarget) ? (

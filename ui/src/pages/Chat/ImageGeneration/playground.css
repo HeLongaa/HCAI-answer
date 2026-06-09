@@ -1643,14 +1643,14 @@ body.drag-selecting * {
 
 #image-playground.hcai-image-playground-shell [data-input-bar] {
   position: absolute;
-  left: 50%;
-  right: auto;
+  left: 18px;
+  right: 46px;
   bottom: 18px;
   z-index: 24;
-  width: min(920px, calc(100% - 56px));
-  max-width: 920px;
+  width: auto;
+  max-width: none;
   padding: 0;
-  transform: translateX(-50%);
+  transform: none;
 }
 
 #image-playground.hcai-image-playground-shell
@@ -3654,6 +3654,14 @@ body
     grid-template-columns: auto minmax(48px, 1fr) auto;
     margin-bottom: 14px;
     padding: 12px;
+  }
+
+  #image-playground.hcai-image-playground-shell [data-input-bar] {
+    left: 28px;
+    right: 28px;
+    width: auto;
+    max-width: none;
+    transform: none;
   }
 }
 

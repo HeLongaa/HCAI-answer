@@ -119,6 +119,29 @@ const TaskContent: FC<IProps> = ({ refreshCount, status }) => {
     queryNextOne(1);
   }, [status]);
 
+  useEffect(() => {
+    const handleRealtime = (evt: Event) => {
+      const event = (evt as CustomEvent).detail;
+      if (event?.type !== 'tasks.changed') {
+        return;
+      }
+      const taskID = Number(event?.data?.task_id || 0);
+      const nextStatus = event?.data?.status;
+      if (!taskID || taskID !== task?.id) {
+        return;
+      }
+      if (!nextStatus || nextStatus !== status) {
+        queryNextOne(page);
+        refreshCount();
+      }
+    };
+
+    window.addEventListener('hcai:realtime', handleRealtime);
+    return () => {
+      window.removeEventListener('hcai:realtime', handleRealtime);
+    };
+  }, [page, refreshCount, status, task?.id]);
+
   const handleSkip = () => {
     queryNextOne(page + 1);
   };

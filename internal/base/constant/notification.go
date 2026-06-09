@@ -60,6 +60,22 @@ const (
 	NotificationNewQuestionFollowedTag = "notification.action.new_question_followed_tag"
 	// NotificationEarnedBadge earned badge
 	NotificationEarnedBadge = "notification.action.earned_badge"
+	// NotificationTaskSubmittedForReview task submitted for review
+	NotificationTaskSubmittedForReview = "notification.action.task_submitted_for_review"
+	// NotificationTaskReviewApproved task review approved
+	NotificationTaskReviewApproved = "notification.action.task_review_approved"
+	// NotificationTaskReviewRejected task review rejected
+	NotificationTaskReviewRejected = "notification.action.task_review_rejected"
+	// NotificationTaskClaimed task claimed
+	NotificationTaskClaimed = "notification.action.task_claimed"
+	// NotificationTaskClaimedAdmin task claimed admin
+	NotificationTaskClaimedAdmin = "notification.action.task_claimed_admin"
+	// NotificationTaskSubmittedForAcceptance task submitted for acceptance
+	NotificationTaskSubmittedForAcceptance = "notification.action.task_submitted_for_acceptance"
+	// NotificationTaskAcceptanceApproved task acceptance approved
+	NotificationTaskAcceptanceApproved = "notification.action.task_acceptance_approved"
+	// NotificationTaskAcceptanceRejected task acceptance rejected
+	NotificationTaskAcceptanceRejected = "notification.action.task_acceptance_rejected"
 )
 
 type NotificationChannelKey string

@@ -71,6 +71,7 @@ type TaskResp struct {
 	UserID                 string              `json:"user_id"`
 	UserDisplayName        string              `json:"user_display_name"`
 	ReviewerID             string              `json:"reviewer_id"`
+	ReviewerDisplayName    string              `json:"reviewer_display_name"`
 	AssigneeID             string              `json:"assignee_id"`
 	AssigneeDisplayName    string              `json:"assignee_display_name"`
 	Title                  string              `json:"title"`

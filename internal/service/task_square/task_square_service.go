@@ -13,9 +13,12 @@ import (
 	"github.com/apache/answer/internal/base/reason"
 	"github.com/apache/answer/internal/entity"
 	"github.com/apache/answer/internal/schema"
+	"github.com/apache/answer/internal/service/export"
 	"github.com/apache/answer/internal/service/realtime"
+	"github.com/apache/answer/internal/service/role"
 	"github.com/apache/answer/internal/service/siteinfo_common"
 	"github.com/apache/answer/internal/service/unique"
+	usernotificationconfig "github.com/apache/answer/internal/service/user_notification_config"
 	"github.com/apache/answer/pkg/uid"
 	"github.com/segmentfault/pacman/errors"
 	"xorm.io/builder"
@@ -47,10 +50,13 @@ func isPublicTaskStatus(status string) bool {
 }
 
 type TaskSquareService struct {
-	data            *data.Data
-	uniqueIDRepo    unique.UniqueIDRepo
-	realtime        *realtime.Service
-	siteInfoService siteinfo_common.SiteInfoCommonService
+	data                       *data.Data
+	uniqueIDRepo               unique.UniqueIDRepo
+	realtime                   *realtime.Service
+	siteInfoService            siteinfo_common.SiteInfoCommonService
+	userRoleService            *role.UserRoleRelService
+	emailService               *export.EmailService
+	userNotificationConfigRepo usernotificationconfig.UserNotificationConfigRepo
 }
 
 func NewTaskSquareService(
@@ -58,12 +64,18 @@ func NewTaskSquareService(
 	uniqueIDRepo unique.UniqueIDRepo,
 	realtime *realtime.Service,
 	siteInfoService siteinfo_common.SiteInfoCommonService,
+	userRoleService *role.UserRoleRelService,
+	emailService *export.EmailService,
+	userNotificationConfigRepo usernotificationconfig.UserNotificationConfigRepo,
 ) *TaskSquareService {
 	return &TaskSquareService{
-		data:            data,
-		uniqueIDRepo:    uniqueIDRepo,
-		realtime:        realtime,
-		siteInfoService: siteInfoService,
+		data:                       data,
+		uniqueIDRepo:               uniqueIDRepo,
+		realtime:                   realtime,
+		siteInfoService:            siteInfoService,
+		userRoleService:            userRoleService,
+		emailService:               emailService,
+		userNotificationConfigRepo: userNotificationConfigRepo,
 	}
 }
 
@@ -135,6 +147,9 @@ func (s *TaskSquareService) CreateTask(ctx context.Context, req *schema.TaskCrea
 		Insert(task)
 	if err == nil {
 		s.publishTaskChanged(task, req.UserID)
+		if !req.IsAdminModerator {
+			s.notifyAdminsTaskSubmitted(ctx, task, req.UserID)
+		}
 	}
 	return err
 }
@@ -220,6 +235,7 @@ func (s *TaskSquareService) ReviewTask(ctx context.Context, req *schema.TaskRevi
 		task.Status = req.Status
 		task.AssigneeID = ""
 		s.publishTaskChanged(task, task.UserID)
+		s.notifyTaskReviewed(ctx, task, req.OperatorID)
 	}
 	return err
 }
@@ -250,6 +266,7 @@ func (s *TaskSquareService) ClaimTask(ctx context.Context, req *schema.TaskClaim
 	task.AssigneeID = req.UserID
 	task.Status = entity.TaskStatusInProgress
 	s.publishTaskChanged(task, req.UserID)
+	s.notifyTaskClaimed(ctx, task, req.UserID)
 	return nil
 }
 
@@ -279,6 +296,7 @@ func (s *TaskSquareService) AssignTask(ctx context.Context, req *schema.TaskAssi
 	task.AssigneeID = req.AssigneeID
 	task.Status = entity.TaskStatusInProgress
 	s.publishTaskChanged(task, req.AssigneeID)
+	s.notifyTaskClaimed(ctx, task, req.OperatorID)
 	return nil
 }
 
@@ -306,9 +324,9 @@ func (s *TaskSquareService) SubmitTask(ctx context.Context, req *schema.TaskSubm
 		return err
 	}
 	affected, err := session.
+		Table(new(entity.Task)).
 		Where("id = ? AND assignee_id = ? AND status = ?", req.ID, req.UserID, entity.TaskStatusInProgress).
-		Cols("status").
-		Update(&entity.Task{Status: entity.TaskStatusSubmitted})
+		Update(map[string]any{"status": entity.TaskStatusSubmitted})
 	if err != nil {
 		_ = session.Rollback()
 		return err
@@ -332,7 +350,9 @@ func (s *TaskSquareService) SubmitTask(ctx context.Context, req *schema.TaskSubm
 	if err = session.Commit(); err != nil {
 		return err
 	}
-	s.publishTaskChanged(&entity.Task{ID: req.ID, UserID: task.UserID, AssigneeID: task.AssigneeID, Status: entity.TaskStatusSubmitted}, req.UserID)
+	task.Status = entity.TaskStatusSubmitted
+	s.publishTaskChanged(task, req.UserID)
+	s.notifyTaskSubmittedForAcceptance(ctx, task, req.UserID)
 	return nil
 }
 
@@ -467,6 +487,7 @@ func (s *TaskSquareService) ReviewSubmission(ctx context.Context, req *schema.Ta
 		task.Status = entity.TaskStatusInProgress
 	}
 	s.publishTaskChanged(task, task.AssigneeID)
+	s.notifyTaskAcceptanceReviewed(ctx, task, req.OperatorID, req.ReviewNote, req.Approved)
 	if req.Approved {
 		s.sendToUser(task.AssigneeID, realtime.EventPointsChanged, map[string]any{"source": entity.PointSourceTaskReward})
 		s.broadcastToAdmins(realtime.EventAdminUsersChanged, map[string]any{"user_id": task.AssigneeID})
@@ -754,7 +775,10 @@ func (s *TaskSquareService) taskResp(ctx context.Context, task *entity.Task, use
 	canViewPrivateFields := s.canViewTaskPrivateFields(task, userID, isAdmin)
 	resp := &schema.TaskResp{
 		ID: task.ID, CreatedAt: unixTime(task.CreatedAt), UpdatedAt: unixTime(task.UpdatedAt), UserID: task.UserID,
-		UserDisplayName: s.userName(ctx, task.UserID), ReviewerID: task.ReviewerID, AssigneeID: task.AssigneeID,
+		UserDisplayName:     s.userName(ctx, task.UserID),
+		ReviewerID:          task.ReviewerID,
+		ReviewerDisplayName: s.userName(ctx, task.ReviewerID),
+		AssigneeID:          task.AssigneeID,
 		AssigneeDisplayName: s.userName(ctx, task.AssigneeID), Title: task.Title, Description: task.Description,
 		Tags: decodeList(task.Tags), RewardPoints: task.RewardPoints, Deadline: unixTime(task.Deadline),
 		SubmissionRequirements: task.SubmissionRequirements, Attachments: decodeList(task.Attachments), Status: task.Status,
@@ -765,7 +789,6 @@ func (s *TaskSquareService) taskResp(ctx context.Context, task *entity.Task, use
 		resp.Description = ""
 		resp.SubmissionRequirements = ""
 		resp.Attachments = []string{}
-		resp.ReviewComment = ""
 	}
 	sub := &entity.TaskSubmission{}
 	has, err := s.data.DB.Context(ctx).Where("task_id = ?", task.ID).Desc("id").Get(sub)

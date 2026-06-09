@@ -40,6 +40,7 @@ const refreshFragments: Record<string, string[]> = {
   'tasks.changed': [
     '/answer/api/v1/tasks',
     '/answer/api/v1/task',
+    '/answer/api/v1/review/tasks',
     '/answer/admin/api/tasks',
   ],
   'admin.users.changed': ['/answer/admin/api/users/page'],
@@ -123,6 +124,9 @@ const RealtimeEvents: FC = () => {
     const handleMessage = (evt: MessageEvent<string>) => {
       try {
         const event = JSON.parse(evt.data) as RealtimeEvent;
+        window.dispatchEvent(
+          new CustomEvent('hcai:realtime', { detail: event }),
+        );
         refreshByType(event.type);
       } catch {
         // Ignore malformed realtime messages; the stream will continue.

@@ -359,6 +359,33 @@ func (es *EmailService) NewQuestionTemplate(ctx context.Context, raw *schema.New
 	return title, body, nil
 }
 
+// TaskNotificationTemplate task square notification template
+func (es *EmailService) TaskNotificationTemplate(ctx context.Context, raw *schema.TaskNotificationTemplateRawData) (
+	title, body string, err error) {
+	siteInfo, err := es.siteInfoService.GetSiteGeneral(ctx)
+	if err != nil {
+		return
+	}
+	templateData := &schema.TaskNotificationTemplateData{
+		SiteName:    siteInfo.Name,
+		ActionTitle: raw.ActionTitle,
+		TaskTitle:   raw.TaskTitle,
+		TaskURL:     raw.TaskURL,
+		Summary:     raw.Summary,
+	}
+
+	lang := handler.GetLangByCtx(ctx)
+	title = translator.TrWithData(lang, constant.EmailTplKeyTaskNotificationTitle, templateData)
+	body = translator.TrWithData(lang, constant.EmailTplKeyTaskNotificationBody, &schema.TaskNotificationTemplateData{
+		SiteName:    escapeEmailHTMLText(templateData.SiteName),
+		ActionTitle: escapeEmailHTMLText(templateData.ActionTitle),
+		TaskTitle:   escapeEmailHTMLText(templateData.TaskTitle),
+		TaskURL:     templateData.TaskURL,
+		Summary:     escapeEmailHTMLText(templateData.Summary),
+	})
+	return title, body, nil
+}
+
 func (es *EmailService) GetEmailConfig(ctx context.Context) (ec *EmailConfig, err error) {
 	emailConf, err := es.configService.GetStringValue(ctx, constant.EmailConfigKey)
 	if err != nil {

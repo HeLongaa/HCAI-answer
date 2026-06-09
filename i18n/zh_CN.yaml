@@ -483,6 +483,22 @@ backend:
         other: 在你关注的标签中发布了新话题
       earned_badge:
         other: 你获得 "{{.BadgeName}}" 徽章
+      task_submitted_for_review:
+        other: 提交了新的任务需求
+      task_review_approved:
+        other: 审核通过了你的任务需求
+      task_review_rejected:
+        other: 驳回了你的任务需求
+      task_claimed:
+        other: 领取了你的任务
+      task_claimed_admin:
+        other: 领取了任务
+      task_submitted_for_acceptance:
+        other: 提交了任务验收
+      task_acceptance_approved:
+        other: 通过了你的任务验收
+      task_acceptance_rejected:
+        other: 退回了你的任务验收
   email_tpl:
     change_email:
       title:
@@ -509,6 +525,11 @@ backend:
         other: "[{{.SiteName}}] 新话题: {{.QuestionTitle}}"
       body:
         other: "<a href='{{.QuestionUrl}}'>{{.QuestionTitle}}</a><br><br>\n<small>{{.Tags}}</small><br><br>\n\n--<br>\n这是系统自动发送的电子邮件，请勿回复，因为您的回复将不会被看到 <br><br>\n\n<small><a href='{{.UnsubscribeUrl}}'>取消订阅</a></small>"
+    task_notification:
+      title:
+        other: "[{{.SiteName}}] {{.ActionTitle}}"
+      body:
+        other: "<a href='{{.TaskURL}}'>{{.TaskTitle}}</a><br><br>\n\n{{.ActionTitle}}：<br>\n<blockquote>{{.Summary}}</blockquote><br>\n<a href='{{.TaskURL}}'>在 {{.SiteName}} 上查看</a><br><br>\n\n--<br>\n这是系统自动发送的电子邮件，请勿回复，因为您的回复将不会被看到"
     pass_reset:
       title:
         other: "[{{.SiteName }}] 重置密码"

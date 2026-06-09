@@ -29,6 +29,7 @@ const (
 	ReportObjectType     = "report"
 	BadgeObjectType      = "badge"
 	BadgeAwardObjectType = "badge_award"
+	TaskObjectType       = "task"
 )
 
 var (

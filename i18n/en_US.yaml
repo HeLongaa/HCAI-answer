@@ -484,6 +484,22 @@ backend:
         other: posted a new question in a tag you follow
       earned_badge:
         other: You've earned the "{{.BadgeName}}" badge
+      task_submitted_for_review:
+        other: submitted a new task request
+      task_review_approved:
+        other: approved your task request
+      task_review_rejected:
+        other: rejected your task request
+      task_claimed:
+        other: claimed your task
+      task_claimed_admin:
+        other: claimed a task
+      task_submitted_for_acceptance:
+        other: submitted a task for acceptance
+      task_acceptance_approved:
+        other: approved your task submission
+      task_acceptance_rejected:
+        other: rejected your task submission
   email_tpl:
     change_email:
       title:
@@ -510,6 +526,11 @@ backend:
         other: "[{{.SiteName}}] New question: {{.QuestionTitle}}"
       body:
         other: "<a href='{{.QuestionUrl}}'>{{.QuestionTitle}}</a><br>\n<small>{{.Tags}}</small><br><br>\n\n--<br>\nNote: This is an automatic system email, please do not reply to this message as your response will not be seen.<br><br>\n\n<small><a href='{{.UnsubscribeUrl}}'>Unsubscribe</a></small>"
+    task_notification:
+      title:
+        other: "[{{.SiteName}}] {{.ActionTitle}}"
+      body:
+        other: "<a href='{{.TaskURL}}'>{{.TaskTitle}}</a><br><br>\n\n{{.ActionTitle}}:<br>\n<blockquote>{{.Summary}}</blockquote><br>\n<a href='{{.TaskURL}}'>View it on {{.SiteName}}</a><br><br>\n\n--<br>\nNote: This is an automatic system email, please do not reply to this message as your response will not be seen."
     pass_reset:
       title:
         other: "[{{.SiteName }}] Password reset"

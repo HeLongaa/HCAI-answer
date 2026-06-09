@@ -43,4 +43,7 @@ const (
 
 	EmailTplKeyNewQuestionTitle = "email_tpl.new_question.title"
 	EmailTplKeyNewQuestionBody  = "email_tpl.new_question.body"
+
+	EmailTplKeyTaskNotificationTitle = "email_tpl.task_notification.title"
+	EmailTplKeyTaskNotificationBody  = "email_tpl.task_notification.body"
 )
