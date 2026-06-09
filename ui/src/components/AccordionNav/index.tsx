@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import React, { FC, useEffect, useMemo, useState } from 'react';
+import React, { FC, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Accordion, Nav } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useMatch, NavLink } from 'react-router-dom';
@@ -139,9 +139,14 @@ function MenuNode({
 
 interface AccordionProps {
   menus: MenuItem[];
+  accordionId?: string;
   path?: string;
 }
-const AccordionNav: FC<AccordionProps> = ({ menus = [], path = '/' }) => {
+const AccordionNav: FC<AccordionProps> = ({
+  menus = [],
+  accordionId = 'answerAccordion',
+  path = '/',
+}) => {
   const navigate = useNavigate();
   const pathMatch = useMatch(`${path}*`);
   // auto set menu fields
@@ -186,9 +191,9 @@ const AccordionNav: FC<AccordionProps> = ({ menus = [], path = '/' }) => {
     activeKey = splat;
   }
 
-  const getOpenKey = () => {
-    let openKey = '';
-    normalizedMenus.forEach((li) => {
+  const matchedOpenKey = useMemo(() => {
+    let nextOpenKey = '';
+    normalizedMenus.some((li) => {
       if (li.children && li.children.length > 0) {
         const matchedChild = li.children.find((el) => {
           // exact match or path prefix match
@@ -200,14 +205,17 @@ const AccordionNav: FC<AccordionProps> = ({ menus = [], path = '/' }) => {
           );
         });
         if (matchedChild) {
-          openKey = li.path || li.name || '';
+          nextOpenKey = li.path || li.name || '';
+          return true;
         }
       }
+      return false;
     });
-    return openKey;
-  };
+    return nextOpenKey;
+  }, [activeKey, normalizedMenus]);
 
-  const [openKey, setOpenKey] = useState(getOpenKey());
+  const [openKey, setOpenKey] = useState(matchedOpenKey);
+  const syncedActiveKeyRef = useRef(activeKey);
   const menuClick = (evt, menu, href, isLeaf) => {
     evt.stopPropagation();
     if (isLeaf) {
@@ -216,14 +224,24 @@ const AccordionNav: FC<AccordionProps> = ({ menus = [], path = '/' }) => {
         navigate(href);
       }
     } else {
-      setOpenKey(openKey === menu.path ? '' : menu.path);
+      const menuKey = menu.path || menu.name || '';
+      setOpenKey((currentOpenKey) =>
+        currentOpenKey === menuKey ? '' : menuKey,
+      );
     }
   };
-  useEffect(() => {
-    setOpenKey(getOpenKey());
-  }, [activeKey]);
+  useLayoutEffect(() => {
+    if (syncedActiveKeyRef.current !== activeKey) {
+      syncedActiveKeyRef.current = activeKey;
+      setOpenKey(matchedOpenKey);
+    }
+  }, [activeKey, matchedOpenKey]);
   return (
-    <Accordion activeKey={openKey} flush id="answerAccordion">
+    <Accordion
+      activeKey={openKey}
+      flush
+      id={accordionId}
+      className="answer-accordion-nav">
       <Nav variant="pills" className="flex-column" activeKey={activeKey}>
         {normalizedMenus.map((li) => {
           return (

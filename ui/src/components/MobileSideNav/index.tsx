@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 
 import classNames from 'classnames';
@@ -74,13 +74,27 @@ const MobileSideNav = ({ show, onHide }) => {
     storedChatWorkspace === 'image' || storedChatWorkspace === 'video'
       ? `/?workspace=${storedChatWorkspace}`
       : '/';
-  const [conversationsOpen, setConversationsOpen] = useState(true);
   const [conversationList, setConversationList] = useState<
     ConversationListItem[]
   >([]);
+  const [conversationSearch, setConversationSearch] = useState('');
   const [conversationID, setConversationID] = useState('');
 
   const closeSideNav = useCallback(() => onHide(false), [onHide]);
+  const renderSideNavContent = show;
+  const filteredConversationList = useMemo(() => {
+    const query = conversationSearch.trim().toLocaleLowerCase();
+    if (!query) {
+      return conversationList;
+    }
+    return conversationList.filter((item) =>
+      [item.topic, item.conversation_id]
+        .filter(Boolean)
+        .join('\n')
+        .toLocaleLowerCase()
+        .includes(query),
+    );
+  }, [conversationList, conversationSearch]);
   const startNewConversation = () => {
     window.dispatchEvent(new CustomEvent('hcai-start-new-conversation'));
     closeSideNav();
@@ -192,7 +206,7 @@ const MobileSideNav = ({ show, onHide }) => {
           <span>升级套餐</span>
         </button>
 
-        {isChat ? (
+        {renderSideNavContent && isChat ? (
           <div className="mobile-chat-nav" aria-label="HCAI-Chat navigation">
             <nav className="mobile-chat-nav-main">
               {chatNavItems.map((item) => (
@@ -242,49 +256,65 @@ const MobileSideNav = ({ show, onHide }) => {
               />
             ) : (
               <div className="mobile-chat-section">
-                <button
-                  type="button"
-                  className="mobile-chat-section-toggle"
-                  aria-expanded={conversationsOpen}
-                  aria-controls="mobile-chat-conversations"
-                  onClick={() => setConversationsOpen((open) => !open)}>
-                  <Icon
-                    name={conversationsOpen ? 'chevron-down' : 'chevron-right'}
-                  />
-                  <span>对话</span>
-                </button>
-                {conversationsOpen ? (
-                  <div
-                    id="mobile-chat-conversations"
-                    className="mobile-chat-conversation-list">
-                    <span className="mobile-chat-time">过去 7 天</span>
-                    {conversationList.length > 0 ? (
-                      conversationList.map((item) => (
-                        <button
-                          type="button"
-                          className={classNames('mobile-chat-item', {
-                            active: item.conversation_id === conversationID,
-                          })}
-                          key={item.conversation_id}
-                          onClick={() =>
-                            loadConversation(item.conversation_id)
-                          }>
-                          {item.topic}
-                        </button>
-                      ))
-                    ) : (
-                      <span className="mobile-chat-empty">暂无对话</span>
-                    )}
+                <div className="hcai-task-head">
+                  <span>最近对话</span>
+                  <strong>{conversationList.length}</strong>
+                </div>
+                <div
+                  id="mobile-chat-conversations"
+                  className="mobile-chat-conversation-list">
+                  <div className="hcai-agent-conversation-search-wrap">
+                    <svg
+                      aria-hidden="true"
+                      className="hcai-agent-conversation-search-icon"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                      />
+                    </svg>
+                    <input
+                      type="search"
+                      value={conversationSearch}
+                      onChange={(event) =>
+                        setConversationSearch(event.target.value)
+                      }
+                      placeholder="搜索聊天..."
+                      className="hcai-agent-conversation-search"
+                    />
                   </div>
-                ) : null}
+                  {filteredConversationList.length > 0 ? (
+                    filteredConversationList.map((item) => (
+                      <button
+                        type="button"
+                        className={classNames('mobile-chat-item', {
+                          active: item.conversation_id === conversationID,
+                        })}
+                        key={item.conversation_id}
+                        onClick={() => loadConversation(item.conversation_id)}>
+                        {item.topic}
+                      </button>
+                    ))
+                  ) : (
+                    <span className="mobile-chat-empty">
+                      {conversationList.length > 0
+                        ? '没有匹配的对话'
+                        : '暂无对话'}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
-        ) : isAdmin ? (
-          <AdminSideNav showBrand={false} />
-        ) : (
+        ) : renderSideNavContent && isAdmin ? (
+          <AdminSideNav accordionId="adminMobileAccordion" showBrand={false} />
+        ) : renderSideNavContent ? (
           <SideNav showBrand={false} />
-        )}
+        ) : null}
       </aside>
     </>
   );

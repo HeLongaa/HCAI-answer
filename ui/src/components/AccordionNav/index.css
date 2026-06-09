@@ -25,7 +25,7 @@
   transform: rotate(90deg);
 }
 
-#answerAccordion {
+.answer-accordion-nav {
   max-width: 208px;
   overflow: visible;
   border: 0;

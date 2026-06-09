@@ -287,7 +287,6 @@ const Chat: FC = () => {
   const siteInfo = siteInfoStore((state) => state.siteInfo);
   const brandingInfo = brandingStore((state) => state.branding);
   const loggedUser = loggedUserInfoStore((state) => state.user);
-  const [conversationsOpen, setConversationsOpen] = useState(true);
   const [activeWorkspace, setActiveWorkspace] = useState<ChatWorkspace>(
     () => getWorkspaceFromSearchParams(searchParams) || getStoredWorkspace(),
   );
@@ -309,6 +308,7 @@ const Chat: FC = () => {
   const [conversationList, setConversationList] = useState<
     ConversationListItem[]
   >([]);
+  const [conversationSearch, setConversationSearch] = useState('');
   const [conversationID, setConversationID] = useState('');
   const [messages, setMessages] = useState<ConversationDetailItem[]>([]);
   const [messageBranches, setMessageBranches] = useState<
@@ -340,6 +340,19 @@ const Chat: FC = () => {
     () => models.find((model) => model.site_model_id === selectedModelID),
     [models, selectedModelID],
   );
+  const filteredConversationList = useMemo(() => {
+    const query = conversationSearch.trim().toLocaleLowerCase();
+    if (!query) {
+      return conversationList;
+    }
+    return conversationList.filter((item) =>
+      [item.topic, item.conversation_id]
+        .filter(Boolean)
+        .join('\n')
+        .toLocaleLowerCase()
+        .includes(query),
+    );
+  }, [conversationList, conversationSearch]);
   const selectedModelSupportsVision = Boolean(selectedModel?.supports_vision);
   const selectedModelSupportsReasoning = supportsReasoningModel(selectedModel);
   const selectedReasoningEffort = selectedModelID
@@ -1474,43 +1487,59 @@ const Chat: FC = () => {
 
         {activeWorkspace === 'chat' ? (
           <div className="hcai-chat-sidebar-section">
-            <button
-              type="button"
-              className="hcai-chat-sidebar-toggle"
-              aria-expanded={conversationsOpen}
-              aria-controls="hcai-chat-conversations"
-              onClick={() => setConversationsOpen((open) => !open)}>
-              <Icon
-                name={conversationsOpen ? 'chevron-down' : 'chevron-right'}
-              />
-              <span>对话</span>
-            </button>
-            {conversationsOpen ? (
-              <div
-                id="hcai-chat-conversations"
-                className="hcai-conversation-list">
-                <span className="hcai-chat-time">最近对话</span>
-                {conversationList.length > 0 ? (
-                  conversationList.map((item) => (
-                    <button
-                      type="button"
-                      className={
-                        item.conversation_id === conversationID
-                          ? 'hcai-conversation-item active'
-                          : 'hcai-conversation-item'
-                      }
-                      key={item.conversation_id}
-                      onClick={() =>
-                        handleLoadConversation(item.conversation_id)
-                      }>
-                      {item.topic}
-                    </button>
-                  ))
-                ) : (
-                  <span className="hcai-chat-empty">暂无对话</span>
-                )}
+            <div className="hcai-task-head">
+              <span>最近对话</span>
+              <strong>{conversationList.length}</strong>
+            </div>
+            <div
+              id="hcai-chat-conversations"
+              className="hcai-conversation-list">
+              <div className="hcai-agent-conversation-search-wrap">
+                <svg
+                  aria-hidden="true"
+                  className="hcai-agent-conversation-search-icon"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                <input
+                  type="search"
+                  value={conversationSearch}
+                  onChange={(event) =>
+                    setConversationSearch(event.target.value)
+                  }
+                  placeholder="搜索聊天..."
+                  className="hcai-agent-conversation-search"
+                />
               </div>
-            ) : null}
+              {filteredConversationList.length > 0 ? (
+                filteredConversationList.map((item) => (
+                  <button
+                    type="button"
+                    className={
+                      item.conversation_id === conversationID
+                        ? 'hcai-conversation-item active'
+                        : 'hcai-conversation-item'
+                    }
+                    key={item.conversation_id}
+                    onClick={() =>
+                      handleLoadConversation(item.conversation_id)
+                    }>
+                    {item.topic}
+                  </button>
+                ))
+              ) : (
+                <span className="hcai-chat-empty">
+                  {conversationList.length > 0 ? '没有匹配的对话' : '暂无对话'}
+                </span>
+              )}
+            </div>
           </div>
         ) : (
           <div

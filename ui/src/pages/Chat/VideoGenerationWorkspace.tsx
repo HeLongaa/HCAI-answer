@@ -338,6 +338,7 @@ const VideoGenerationWorkspace: FC<IProps> = ({
   const [preset, setPreset] = useState('normal');
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
   const [tasks, setTasks] = useState<VideoTask[]>([]);
+  const [taskSearch, setTaskSearch] = useState('');
   const [activeTaskID, setActiveTaskID] = useState('');
   const [error, setError] = useState('');
   const [actionNotice, setActionNotice] = useState('');
@@ -383,6 +384,29 @@ const VideoGenerationWorkspace: FC<IProps> = ({
     () => tasks.map((task) => task.videoURL).join('|'),
     [tasks],
   );
+  const filteredTasks = useMemo(() => {
+    const query = taskSearch.trim().toLocaleLowerCase();
+    if (!query) {
+      return tasks;
+    }
+    return tasks.filter((task) =>
+      [
+        task.prompt,
+        task.model,
+        task.siteModelID,
+        task.size,
+        task.ratio,
+        task.quality,
+        `${task.seconds} 秒`,
+        getTaskStatusLabel(task.status),
+        task.error || '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+        .toLocaleLowerCase()
+        .includes(query),
+    );
+  }, [taskSearch, tasks]);
 
   const refreshVideoGenerations = useCallback(async () => {
     const resp = await getAiVideoGenerations();
@@ -844,16 +868,42 @@ const VideoGenerationWorkspace: FC<IProps> = ({
   );
 
   const renderTaskPanel = (closePanel = false, showRetry = true) => (
-    <div className="hcai-task-panel">
+    <div className="hcai-task-panel hcai-video-task-panel">
       <div className="hcai-task-head">
         <span>任务队列</span>
         <strong>{tasks.length}</strong>
       </div>
+      <div className="hcai-agent-conversation-search-wrap">
+        <svg
+          aria-hidden="true"
+          className="hcai-agent-conversation-search-icon"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          />
+        </svg>
+        <input
+          type="search"
+          value={taskSearch}
+          onChange={(event) => setTaskSearch(event.target.value)}
+          placeholder="搜索任务..."
+          className="hcai-agent-conversation-search"
+        />
+      </div>
       <div className="hcai-task-list">
-        {tasks.length > 0 ? (
-          tasks.map((task) => renderTaskItem(task, closePanel, showRetry))
+        {filteredTasks.length > 0 ? (
+          filteredTasks.map((task) =>
+            renderTaskItem(task, closePanel, showRetry),
+          )
         ) : (
-          <span className="hcai-task-empty">暂无任务</span>
+          <span className="hcai-task-empty">
+            {tasks.length > 0 ? '没有匹配的任务' : '暂无任务'}
+          </span>
         )}
       </div>
     </div>

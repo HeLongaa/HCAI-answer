@@ -43,7 +43,7 @@
   max-width: 208px;
 }
 
-#adminSideNav #answerAccordion > .nav {
+#adminSideNav .answer-accordion-nav > .nav {
   gap: 8px;
 }
 
@@ -139,7 +139,7 @@
     }
   }
 
-  #answerAccordion {
+  .answer-accordion-nav {
     .nav-link {
       color: rgba(238, 244, 255, 0.68);
     }

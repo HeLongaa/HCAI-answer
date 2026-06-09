@@ -30,10 +30,14 @@ import { useQueryPlugins } from '@/services';
 import { brandingStore, interfaceStore, siteInfoStore } from '@/stores';
 
 interface IProps {
+  accordionId?: string;
   showBrand?: boolean;
 }
 
-const AdminSideNav: FC<IProps> = ({ showBrand = true }) => {
+const AdminSideNav: FC<IProps> = ({
+  accordionId = 'adminDesktopAccordion',
+  showBrand = true,
+}) => {
   const { t } = useTranslation('translation', { keyPrefix: 'btns' });
   const interfaceLang = interfaceStore((_) => _.interface.language);
   const siteInfo = siteInfoStore((state) => state.siteInfo);
@@ -103,7 +107,7 @@ const AdminSideNav: FC<IProps> = ({ showBrand = true }) => {
         <Icon name="arrow-left" />
         <span>{t('back_sites')}</span>
       </NavLink>
-      <AccordionNav menus={menus} path="/admin/" />
+      <AccordionNav accordionId={accordionId} menus={menus} path="/admin/" />
     </div>
   );
 };

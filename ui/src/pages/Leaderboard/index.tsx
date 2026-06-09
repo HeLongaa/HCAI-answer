@@ -205,7 +205,7 @@ const Leaderboard: FC = () => {
             )}
 
             {rowItems.length > 0 && (
-              <div className="leaderboard-rows">
+              <div className="leaderboard-rows leaderboard-rows-desktop">
                 {rowItems.map((item) => (
                   <LeaderboardRow
                     item={item}
@@ -216,6 +216,17 @@ const Leaderboard: FC = () => {
                 ))}
               </div>
             )}
+
+            <div className="leaderboard-rows leaderboard-rows-mobile">
+              {list.map((item) => (
+                <LeaderboardRow
+                  item={item}
+                  place={placeByUsername.get(item.username) || 0}
+                  metricLabel={metricLabel}
+                  key={item.username}
+                />
+              ))}
+            </div>
           </>
         ) : (
           <Empty>暂无排行榜数据</Empty>

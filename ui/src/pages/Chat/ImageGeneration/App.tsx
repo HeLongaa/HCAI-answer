@@ -35,6 +35,17 @@ import {
 import { useGlobalClickSuppression } from './lib/clickSuppression';
 
 let customProviderConfigUrlImportStarted = false;
+let imageGenerationInitPromise: Promise<void> | null = null;
+
+function ensureImageGenerationInitialized() {
+  if (!imageGenerationInitPromise) {
+    imageGenerationInitPromise = initStore().catch((error) => {
+      imageGenerationInitPromise = null;
+      throw error;
+    });
+  }
+  return imageGenerationInitPromise;
+}
 
 interface AppProps {
   embedded?: boolean;
@@ -96,7 +107,7 @@ export default function App({ embedded = false }: AppProps) {
 
     let cancelled = false;
     void (async () => {
-      await initStore();
+      await ensureImageGenerationInitialized();
       if (!cancelled) await loadSystemImageGenerations();
     })();
     void loadSystemImageModels();
