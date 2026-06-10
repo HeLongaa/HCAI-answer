@@ -124,6 +124,7 @@ var migrations = []Migration{
 	NewMigration("v2.1.13", "ensure ai image model config columns", ensureAIImageModelConfigColumns, false),
 	NewMigration("v2.1.14", "ensure point transaction unique source index", ensurePointTransactionUniqueSourceIndex, false),
 	NewMigration("v2.1.15", "allow featured post history", allowFeaturedPostHistory, false),
+	NewMigration("v2.1.16", "add ai chat title setting", addAIChatSetting, false),
 }
 
 func GetMigrations() []Migration {

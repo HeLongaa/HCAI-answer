@@ -22,27 +22,36 @@ import { Row, Col, Nav } from 'react-bootstrap';
 import { Outlet, NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
+import AuthBackButton from '@/components/AuthBackButton';
+
+import './index.scss';
+
 const Index: FC = () => {
   const { t } = useTranslation('translation', { keyPrefix: 'nav_menus' });
   return (
-    <Row className="pt-4 mb-5">
-      <Col xxl={12}>
-        <Nav
-          className="mb-4 flex-nowrap"
-          variant="pills"
-          style={{ overflow: 'auto' }}>
-          <NavLink to="/tos" key="tos" className="nav-link">
-            {t('tos')}
-          </NavLink>
-          <NavLink to="/privacy" key="privacy" className="nav-link">
-            {t('privacy')}
-          </NavLink>
-        </Nav>
-      </Col>
-      <Col xxl={12}>
-        <Outlet />
-      </Col>
-    </Row>
+    <main className="legal-public-page">
+      <Row className="legal-public-shell">
+        <Col xxl={12}>
+          <div className="legal-public-topbar">
+            <AuthBackButton fallbackTo="/users/register" mode="fallback" />
+            <Nav className="legal-public-tabs flex-nowrap" variant="pills">
+              <NavLink to="/tos" key="tos" className="nav-link">
+                {t('tos')}
+              </NavLink>
+              <NavLink to="/privacy" key="privacy" className="nav-link">
+                {t('privacy')}
+              </NavLink>
+            </Nav>
+            <span className="legal-public-topbar-spacer" aria-hidden="true" />
+          </div>
+        </Col>
+        <Col xxl={12}>
+          <section className="legal-public-card">
+            <Outlet />
+          </section>
+        </Col>
+      </Row>
+    </main>
   );
 };
 

@@ -61,7 +61,7 @@ const routes: RouteNode[] = [
     children: [
       {
         index: true,
-        page: 'pages/Chat',
+        page: 'pages/Home',
       },
       {
         path: 'subscription',
@@ -541,20 +541,15 @@ const routes: RouteNode[] = [
     },
     children: [
       {
-        page: 'pages/SideNavLayout',
+        page: 'pages/Legal',
         children: [
           {
-            page: 'pages/Legal',
-            children: [
-              {
-                path: 'tos',
-                page: 'pages/Legal/Tos',
-              },
-              {
-                path: 'privacy',
-                page: 'pages/Legal/Privacy',
-              },
-            ],
+            path: 'tos',
+            page: 'pages/Legal/Tos',
+          },
+          {
+            path: 'privacy',
+            page: 'pages/Legal/Privacy',
           },
         ],
       },

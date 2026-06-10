@@ -245,6 +245,16 @@ type AIChatUsageLogReq struct {
 	ConsumePoints    float64 `json:"consume_points"`
 }
 
+type AIChatSettingReq struct {
+	TitleModelID string `json:"title_model_id"`
+}
+
+type AIChatSettingResp struct {
+	TitleModelID string `json:"title_model_id"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+}
+
 type AIAgentResponsesReq struct {
 	ImageModel        string `json:"model" validate:"required"`
 	Instructions      string `json:"instructions"`

@@ -66,7 +66,7 @@ import './index.scss';
 const navItems = [
   { icon: 'pencil-square', label: '聊天', action: 'new' },
   { icon: 'image', label: '图片生成', action: 'image' },
-  { icon: 'camera-reels', label: '视频生成', action: 'video' },
+  { icon: 'camera-reels', label: '视频生成', action: 'video', beta: true },
   { icon: 'credit-card-2-front', label: '订阅管理', action: 'subscription' },
   { icon: 'stars', label: '订阅兑换', action: 'redeem' },
 ];
@@ -333,8 +333,10 @@ const Chat: FC = () => {
   const scrollBottomFrameRef = useRef<number | null>(null);
   const scrollBottomTimerRefs = useRef<number[]>([]);
   const scrollVisibilityFrameRef = useRef<number | null>(null);
+  const conversationRefreshTimerRefs = useRef<number[]>([]);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const selectedModel = useMemo(
     () => models.find((model) => model.site_model_id === selectedModelID),
@@ -358,6 +360,33 @@ const Chat: FC = () => {
   const selectedReasoningEffort = selectedModelID
     ? modelReasoningEfforts[selectedModelID] || ''
     : '';
+  const adjustPromptTextareaHeight = useCallback(() => {
+    const textarea = promptTextareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = 'auto';
+    const computed = window.getComputedStyle(textarea);
+    const maxHeight = Number.parseFloat(computed.maxHeight);
+    const nextHeight = Number.isFinite(maxHeight)
+      ? Math.min(textarea.scrollHeight, maxHeight)
+      : textarea.scrollHeight;
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY =
+      Number.isFinite(maxHeight) && textarea.scrollHeight > maxHeight
+        ? 'auto'
+        : 'hidden';
+  }, []);
+
+  useLayoutEffect(() => {
+    adjustPromptTextareaHeight();
+  }, [adjustPromptTextareaHeight, prompt]);
+
+  useEffect(() => {
+    window.addEventListener('resize', adjustPromptTextareaHeight);
+    return () => {
+      window.removeEventListener('resize', adjustPromptTextareaHeight);
+    };
+  }, [adjustPromptTextareaHeight]);
   const siteIcon =
     brandingInfo.square_icon ||
     brandingInfo.favicon ||
@@ -392,6 +421,25 @@ const Chat: FC = () => {
   const refreshConversations = async () => {
     const data = await getConversationList({ page: 1, page_size: 30 });
     setConversationList(data.list || []);
+  };
+
+  const clearConversationRefreshTimers = useCallback(() => {
+    conversationRefreshTimerRefs.current.forEach((timer) => {
+      window.clearTimeout(timer);
+    });
+    conversationRefreshTimerRefs.current = [];
+  }, []);
+
+  const refreshConversationsAfterChatComplete = () => {
+    clearConversationRefreshTimers();
+    refreshConversations().catch(() => undefined);
+    conversationRefreshTimerRefs.current = [
+      1500, 3500, 6500, 10000, 15000, 22000, 30000,
+    ].map((delay) =>
+      window.setTimeout(() => {
+        refreshConversations().catch(() => undefined);
+      }, delay),
+    );
   };
 
   const applyConversationRecords = (records: ConversationDetailItem[]) => {
@@ -556,7 +604,7 @@ const Chat: FC = () => {
     refreshModels();
     refreshSubscription().catch(() => undefined);
     refreshConversations().catch(() => undefined);
-  }, []);
+  }, [clearConversationRefreshTimers]);
 
   useLayoutEffect(() => {
     const urlWorkspace = getWorkspaceFromSearchParams(searchParams);
@@ -642,6 +690,7 @@ const Chat: FC = () => {
         window.clearTimeout(timer);
       });
       scrollBottomTimerRefs.current = [];
+      clearConversationRefreshTimers();
     };
   }, []);
 
@@ -1157,7 +1206,7 @@ const Chat: FC = () => {
       },
       onComplete: () => {
         setIsGenerating(false);
-        refreshConversations().catch(() => undefined);
+        refreshConversationsAfterChatComplete();
         refreshSubscription().catch(() => undefined);
       },
     }).catch((err) => {
@@ -1260,7 +1309,7 @@ const Chat: FC = () => {
       },
       onComplete: () => {
         setIsGenerating(false);
-        refreshConversations().catch(() => undefined);
+        refreshConversationsAfterChatComplete();
         refreshSubscription().catch(() => undefined);
       },
     }).catch((err) => {
@@ -1480,7 +1529,12 @@ const Chat: FC = () => {
               key={item.label}
               onClick={() => handleNavAction(item.action)}>
               <Icon name={item.icon} />
-              <span>{item.label}</span>
+              <span className="hcai-chat-nav-label">
+                {item.label}
+                {item.beta ? (
+                  <span className="hcai-chat-nav-beta">Beta</span>
+                ) : null}
+              </span>
             </button>
           ))}
         </nav>
@@ -1635,10 +1689,12 @@ const Chat: FC = () => {
           {activeWorkspace === 'chat' ? (
             <form className="hcai-prompt-card" onSubmit={handleSubmit}>
               <textarea
+                ref={promptTextareaRef}
                 value={prompt}
                 placeholder="有什么我能帮您的吗?"
                 aria-label="聊天输入"
                 rows={1}
+                wrap="soft"
                 disabled={isGenerating}
                 onChange={(evt) => setPrompt(evt.target.value)}
                 onPaste={handlePromptPaste}

@@ -39,6 +39,7 @@ import (
 type AIConversationService interface {
 	CreateConversation(ctx context.Context, userID, conversationID, topic string) error
 	SaveConversationRecords(ctx context.Context, conversationID, chatcmplID, branchParentMessageID string, records []*ConversationMessage) error
+	UpdateConversationTopic(ctx context.Context, userID, conversationID, topic string) error
 	GetConversationList(ctx context.Context, req *schema.AIConversationListReq) (*pager.PageModel, error)
 	GetConversationDetail(ctx context.Context, req *schema.AIConversationDetailReq) (resp *schema.AIConversationDetailResp, exist bool, err error)
 	VoteRecord(ctx context.Context, req *schema.AIConversationVoteReq) error
@@ -98,6 +99,26 @@ func (s *aiConversationService) CreateConversation(ctx context.Context, userID, 
 		return err
 	}
 
+	return nil
+}
+
+func (s *aiConversationService) UpdateConversationTopic(ctx context.Context, userID, conversationID, topic string) error {
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return nil
+	}
+	conversation, exist, err := s.aiConversationRepo.GetConversation(ctx, conversationID)
+	if err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if !exist || conversation.UserID != userID {
+		return errors.Forbidden(reason.UnauthorizedError)
+	}
+	conversation.Topic = topic
+	conversation.UpdatedAt = time.Now()
+	if err = s.aiConversationRepo.UpdateConversation(ctx, conversation); err != nil {
+		return errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
 	return nil
 }
 
@@ -225,10 +246,7 @@ func (s *aiConversationService) GetConversationDetail(ctx context.Context, req *
 	}
 
 	recordList := make([]*schema.AIConversationRecord, 0, len(records))
-	for i, record := range records {
-		if i == 0 {
-			record.Content = conversation.Topic
-		}
+	for _, record := range records {
 		attachments := unmarshalConversationAttachments(record.Attachments)
 		recordList = append(recordList, &schema.AIConversationRecord{
 			ID:               record.ID,

@@ -119,8 +119,12 @@ const Index: FC<IProps> = ({ callback }) => {
   };
 
   return (
-    <Form noValidate onSubmit={handleSubmit} autoComplete="off">
-      <Form.Group controlId="email" className="mb-3">
+    <Form
+      className="auth-form"
+      noValidate
+      onSubmit={handleSubmit}
+      autoComplete="off">
+      <Form.Group controlId="email" className="auth-field">
         <Form.Label>{t('email.label')}</Form.Label>
         <Form.Control
           required
@@ -142,8 +146,8 @@ const Index: FC<IProps> = ({ callback }) => {
         </Form.Control.Feedback>
       </Form.Group>
 
-      <div className="d-grid mb-3">
-        <Button variant="primary" type="submit">
+      <div className="d-grid">
+        <Button className="auth-submit" variant="primary" type="submit">
           {t('btn_name')}
         </Button>
       </div>

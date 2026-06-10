@@ -142,6 +142,8 @@ type AiChatConfigService interface {
 	ReserveChatUsage(ctx context.Context, req *schema.AIChatUsageLogReq) error
 	CompleteChatUsage(ctx context.Context, chatCompletionID string) error
 	ReleaseChatUsage(ctx context.Context, chatCompletionID string) error
+	GetChatSetting(ctx context.Context) (*schema.AIChatSettingResp, error)
+	SaveChatSetting(ctx context.Context, req *schema.AIChatSettingReq) (*schema.AIChatSettingResp, error)
 
 	ListImageProviders(ctx context.Context) ([]*schema.AIImageProviderResp, error)
 	CreateImageProvider(ctx context.Context, req *schema.AIImageProviderReq) (*schema.AIImageProviderResp, error)
@@ -1046,6 +1048,41 @@ func (s *aiChatConfigService) ReleaseChatUsage(ctx context.Context, chatCompleti
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
 	return nil
+}
+
+func (s *aiChatConfigService) GetChatSetting(ctx context.Context) (*schema.AIChatSettingResp, error) {
+	if err := s.repo.EnsureChatSetting(ctx); err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	setting, exist, err := s.repo.GetChatSetting(ctx)
+	if err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if !exist {
+		setting = &entity.AIChatSetting{ID: 1}
+	}
+	return s.formatChatSetting(setting), nil
+}
+
+func (s *aiChatConfigService) SaveChatSetting(ctx context.Context, req *schema.AIChatSettingReq) (*schema.AIChatSettingResp, error) {
+	if err := s.repo.EnsureChatSetting(ctx); err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	titleModelID := strings.TrimSpace(req.TitleModelID)
+	if titleModelID != "" {
+		mapping, exist, err := s.repo.GetModelMappingBySiteModelID(ctx, titleModelID)
+		if err != nil {
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
+		if !exist || !mapping.Enabled {
+			return nil, errors.BadRequest("title model is not available")
+		}
+	}
+	setting := &entity.AIChatSetting{ID: 1, TitleModelID: titleModelID}
+	if err := s.repo.SaveChatSetting(ctx, setting); err != nil {
+		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	return s.formatChatSetting(setting), nil
 }
 
 func (s *aiChatConfigService) ListImageProviders(ctx context.Context) ([]*schema.AIImageProviderResp, error) {
@@ -3141,6 +3178,14 @@ func (s *aiChatConfigService) formatImageSetting(setting *entity.AIImageSetting)
 		RetentionDays: setting.RetentionDays,
 		CreatedAt:     unixOrZero(setting.CreatedAt),
 		UpdatedAt:     unixOrZero(setting.UpdatedAt),
+	}
+}
+
+func (s *aiChatConfigService) formatChatSetting(setting *entity.AIChatSetting) *schema.AIChatSettingResp {
+	return &schema.AIChatSettingResp{
+		TitleModelID: setting.TitleModelID,
+		CreatedAt:    unixOrZero(setting.CreatedAt),
+		UpdatedAt:    unixOrZero(setting.UpdatedAt),
 	}
 }
 

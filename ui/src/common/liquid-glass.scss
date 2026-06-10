@@ -18,7 +18,22 @@
  */
 
 :root {
-  --an-app-bg: linear-gradient(135deg, #f4f8ff 0%, #eef7f1 48%, #fff7ec 100%);
+  --an-app-bg: radial-gradient(
+      circle at 32% 18%,
+      rgba(79, 112, 255, 0.12),
+      transparent 28rem
+    ),
+    radial-gradient(
+      circle at 68% 26%,
+      rgba(37, 200, 177, 0.14),
+      transparent 28rem
+    ),
+    radial-gradient(
+      circle at 55% 82%,
+      rgba(255, 173, 54, 0.12),
+      transparent 30rem
+    ),
+    linear-gradient(135deg, #f4f8ff 0%, #eef7f1 48%, #fff7ec 100%);
   --an-glass-surface: rgba(255, 255, 255, 0.68);
   --an-glass-surface-strong: rgba(255, 255, 255, 0.82);
   --an-glass-surface-soft: rgba(255, 255, 255, 0.48);
@@ -72,22 +87,41 @@ body {
 }
 
 #root {
-  background: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.38),
-      transparent 34rem
-    ),
-    var(--an-app-bg);
+  position: relative;
+  background: var(--an-app-bg);
   background-attachment: fixed;
 }
 
+#root::before,
+#root::after {
+  content: '';
+  position: fixed;
+  pointer-events: none;
+  border-radius: 999px;
+  filter: blur(4px);
+  z-index: 0;
+}
+
+#root::before {
+  width: 34rem;
+  height: 34rem;
+  left: 50%;
+  top: 50%;
+  background: rgba(79, 112, 255, 0.08);
+  transform: translate(-78%, -56%);
+}
+
+#root::after {
+  width: 30rem;
+  height: 30rem;
+  right: 50%;
+  bottom: 50%;
+  background: rgba(37, 200, 177, 0.1);
+  transform: translate(84%, 72%);
+}
+
 [data-bs-theme='dark'] #root {
-  background: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.04),
-      transparent 34rem
-    ),
-    var(--an-app-bg);
+  background: var(--an-app-bg);
 }
 
 .page-wrap {

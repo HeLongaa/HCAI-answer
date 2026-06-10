@@ -477,6 +477,8 @@ func (a *AnswerAPIRouter) RegisterAnswerAdminAPIRouter(r *gin.RouterGroup) {
 	r.POST("/ai-chat/providers/:id/fetch-models", a.aiChatConfigController.FetchProviderModels)
 	r.POST("/ai-chat/providers/:id/test-model", a.aiChatConfigController.TestProviderModel)
 
+	r.GET("/ai-chat/chat-setting", a.aiChatConfigController.GetChatSetting)
+	r.PUT("/ai-chat/chat-setting", a.aiChatConfigController.SaveChatSetting)
 	r.GET("/ai-chat/model-mappings", a.aiChatConfigController.ListModelMappings)
 	r.POST("/ai-chat/model-mappings", a.aiChatConfigController.CreateModelMapping)
 	r.PUT("/ai-chat/model-mappings/:id", a.aiChatConfigController.UpdateModelMapping)

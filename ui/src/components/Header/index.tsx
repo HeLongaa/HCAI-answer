@@ -52,6 +52,28 @@ import NavItems from './components/NavItems';
 
 import './index.scss';
 
+const publicHomeMainSlogan = '让贡献被看见，让价值被奖励。';
+const publicHomeSlogans = [
+  '不会写代码、不会写提示词、不会拆需求，都不妨碍你把想法做出来。',
+  '你是否因为不会使用 AI 而感到焦虑？',
+  '你是否知道 AI 很强，却不知道它能帮你做什么？',
+  '你是否收藏了很多 AI 工具，却从来没有真正用起来？',
+  '你是否试过很多 AI 产品，最后还是回到原来的工作方式？',
+  '你是否觉得 AI 很热闹，但离自己的业务很远？',
+  '你是否担心别人已经用 AI 提效，而自己还停在原地？',
+  '你是否每天都听到 AI，却不知道第一步该从哪里开始？',
+  '你是否想用 AI 提高效率，却不知道适合自己的场景是什么？',
+  '你是否觉得 AI 工具越来越多，但真正好用的很少？',
+  '你是否缺的不是 AI，而是一个能帮你落地的人？',
+];
+const publicHomeRollingSlogans = [
+  ...publicHomeSlogans,
+  ...publicHomeSlogans,
+].map((text, index) => ({
+  id: `${index}-${text}`,
+  text,
+}));
+
 const Header: FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -154,9 +176,11 @@ const Header: FC = () => {
     location.pathname.startsWith('/badges') ||
     location.pathname.startsWith('/review');
   const isSubscriptionPage = location.pathname === '/subscription';
-  const isChatPage = location.pathname === '/';
-  const isLegalSideNavPage =
+  const isPublicHomePage = !user?.username && location.pathname === '/';
+  const isChatPage = Boolean(user?.username) && location.pathname === '/';
+  const isLegalPage =
     location.pathname === '/tos' || location.pathname === '/privacy';
+  const isPublicLegalPage = !user?.username && isLegalPage;
   const isAiAssistantSideNavPage =
     location.pathname.startsWith('/ai-assistant');
   const showAiSubscriptionPill = isChatPage || isSubscriptionPage;
@@ -165,7 +189,6 @@ const Header: FC = () => {
     isSubscriptionPage ||
     isTaskPage ||
     isCommunityPage ||
-    isLegalSideNavPage ||
     isAiAssistantSideNavPage ||
     location.pathname.startsWith('/admin');
   const isAuthFlowPage =
@@ -209,7 +232,7 @@ const Header: FC = () => {
     };
   }, []);
 
-  if (isAuthFlowPage) {
+  if (isAuthFlowPage || isPublicLegalPage) {
     return null;
   }
 
@@ -219,6 +242,7 @@ const Header: FC = () => {
       expand="xl"
       className={classnames('sticky-top', navbarStyle, 'liquid-header', {
         'mobile-side-nav-open': showMobileSideNav,
+        'public-home-header': isPublicHomePage,
       })}
       style={
         {
@@ -241,7 +265,7 @@ const Header: FC = () => {
         />
 
         <Navbar.Brand
-          to={workbenchPath}
+          to={isPublicHomePage ? '/' : workbenchPath}
           as={Link}
           className={classnames('lh-1 me-0 me-sm-5 p-0 nav-text', {
             'side-nav-brand-hidden': isSideNavPage,
@@ -258,42 +282,66 @@ const Header: FC = () => {
           )}
         </Navbar.Brand>
 
+        {isPublicHomePage && (
+          <section className="hcai-home-slogans" aria-label="HCAI 宣传标语">
+            <strong>{publicHomeMainSlogan}</strong>
+            <div className="hcai-slogan-marquee" aria-label="HCAI 用户痛点">
+              <div className="hcai-slogan-track">
+                {publicHomeRollingSlogans.map((slogan) => (
+                  <span key={slogan.id}>{slogan.text}</span>
+                ))}
+              </div>
+            </div>
+            <Link
+              className="hcai-slogan-action"
+              onClick={() => floppyNavigation.storageLoginRedirect()}
+              to={userCenter.getLoginUrl()}>
+              开始体验
+              <Icon name="arrow-right-short" />
+            </Link>
+          </section>
+        )}
+
         <div
           className="header-center d-none d-lg-flex mx-auto"
           ref={headerSearchRef}>
-          <div className="header-segmented-nav" aria-label="Primary navigation">
-            <NavLink
-              to={workbenchPath}
-              end
-              className={classnames('segment-item', {
-                active: location.pathname === '/',
-              })}>
-              工作台
-            </NavLink>
-            <NavLink
-              to="/questions"
-              className={classnames('segment-item', {
-                active: isCommunityPage,
-              })}>
-              社区
-            </NavLink>
-            <NavLink
-              to="/tasks"
-              className={classnames('segment-item', {
-                active: isTaskPage,
-              })}>
-              任务广场
-            </NavLink>
-            <button
-              type="button"
-              className={classnames('segment-item header-upgrade-segment', {
-                active: isSubscriptionPage,
-              })}
-              onClick={() => navigate('/subscription')}>
-              <Icon name="music-note-beamed" />
-              <span>升级套餐</span>
-            </button>
-          </div>
+          {!isPublicHomePage && !isPublicLegalPage && (
+            <div
+              className="header-segmented-nav"
+              aria-label="Primary navigation">
+              <NavLink
+                to={workbenchPath}
+                end
+                className={classnames('segment-item', {
+                  active: location.pathname === '/',
+                })}>
+                工作台
+              </NavLink>
+              <NavLink
+                to="/questions"
+                className={classnames('segment-item', {
+                  active: isCommunityPage,
+                })}>
+                社区
+              </NavLink>
+              <NavLink
+                to="/tasks"
+                className={classnames('segment-item', {
+                  active: isTaskPage,
+                })}>
+                任务广场
+              </NavLink>
+              <button
+                type="button"
+                className={classnames('segment-item header-upgrade-segment', {
+                  active: isSubscriptionPage,
+                })}
+                onClick={() => navigate('/subscription')}>
+                <Icon name="music-note-beamed" />
+                <span>升级套餐</span>
+              </button>
+            </div>
+          )}
 
           {showHeaderSearch && (
             <form
@@ -363,8 +411,8 @@ const Header: FC = () => {
 
             <NavItems redDot={redDot} userInfo={user} logOut={handleLogout} />
           </Nav>
-        ) : (
-          <>
+        ) : isPublicHomePage ? null : (
+          <div className="header-auth-actions ms-auto">
             <Link
               className="me-2 btn btn-link an-header-login"
               onClick={() => floppyNavigation.storageLoginRedirect()}
@@ -378,7 +426,7 @@ const Header: FC = () => {
                 {t('btns.signup')}
               </Link>
             )}
-          </>
+          </div>
         )}
       </div>
 

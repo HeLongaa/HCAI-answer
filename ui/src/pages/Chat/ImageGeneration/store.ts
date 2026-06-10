@@ -90,13 +90,20 @@ import {
   getFalQueuedImageResult,
 } from './lib/falAiImageApi';
 import { getCustomQueuedImageResult } from './lib/openaiCompatibleImageApi';
-import { validateMaskMatchesImage } from './lib/canvasImage';
+import {
+  getImageDimensions,
+  validateMaskMatchesImage,
+} from './lib/canvasImage';
 import { orderInputImagesForMask } from './lib/mask';
 import {
   getChangedParams,
   normalizeParamsForSettings,
 } from './lib/paramCompatibility';
-import { normalizeImageSize } from './lib/size';
+import {
+  getClosestImageSizeOption,
+  normalizeImageDimensionsToSize,
+  normalizeImageSize,
+} from './lib/size';
 
 export const ALL_FAVORITES_COLLECTION_ID = '__all_favorites__';
 export const DEFAULT_FAVORITE_COLLECTION_ID = '__default_favorites__';
@@ -153,6 +160,100 @@ type AgentInputDraft = {
   updatedAt?: number;
 };
 
+function hasTextValue(value?: string | null) {
+  return Boolean(String(value ?? '').trim());
+}
+
+export function hasImageAgentThinkingModel(model?: AiImageModel | null) {
+  if (!model || model.enabled === false) return false;
+  if (hasTextValue(model.agent_model_id)) return true;
+  return Boolean(
+    model.upstreams?.some(
+      (upstream) =>
+        upstream.enabled !== false && hasTextValue(upstream.agent_model_id),
+    ),
+  );
+}
+
+export function hasAnyImageAgentThinkingModel(models: AiImageModel[]) {
+  return models.some(hasImageAgentThinkingModel);
+}
+
+function getPreferredImageAgentThinkingModel(
+  models: AiImageModel[],
+  selectedModelId?: string,
+) {
+  const selectedModel = models.find(
+    (model) => model.site_model_id === selectedModelId,
+  );
+  if (hasImageAgentThinkingModel(selectedModel)) return selectedModel;
+  return models.find(hasImageAgentThinkingModel) ?? null;
+}
+
+function getAgentThinkingModelUnavailableMessage(state: AppState) {
+  if (state.systemImageModelsLoading) return '图片模型正在加载';
+  if (state.systemImageModelsError) return state.systemImageModelsError;
+  return '暂无可用 Agent 思考模型，请联系管理员配置';
+}
+
+function getStoredInputImageSize(image: InputImage) {
+  if (
+    Number.isFinite(image.width) &&
+    Number.isFinite(image.height) &&
+    (image.width ?? 0) > 0 &&
+    (image.height ?? 0) > 0
+  ) {
+    return normalizeImageDimensionsToSize(image.width!, image.height!);
+  }
+  return '';
+}
+
+async function getDataUrlReferenceImageSize(dataUrl: string) {
+  if (!dataUrl) return '';
+  try {
+    const { width, height } = await getImageDimensions(dataUrl);
+    return normalizeImageDimensionsToSize(width, height);
+  } catch {
+    return '';
+  }
+}
+
+export async function getReferenceImageSizeForInputImages(
+  inputImages: InputImage[],
+) {
+  for (const image of inputImages) {
+    const storedSize = getStoredInputImageSize(image);
+    if (storedSize) return storedSize;
+    const dataUrlSize = await getDataUrlReferenceImageSize(image.dataUrl);
+    if (dataUrlSize) return dataUrlSize;
+  }
+  return '';
+}
+
+async function getReferenceImageSizeForDataUrls(dataUrls: string[]) {
+  for (const dataUrl of dataUrls) {
+    const size = await getDataUrlReferenceImageSize(dataUrl);
+    if (size) return size;
+  }
+  return '';
+}
+
+async function withReferenceImageSize(
+  params: TaskParams,
+  inputImages: InputImage[],
+) {
+  const referenceSize = await getReferenceImageSizeForInputImages(inputImages);
+  return referenceSize ? { ...params, size: referenceSize } : params;
+}
+
+async function withReferenceDataUrlSize(
+  params: TaskParams,
+  dataUrls: string[],
+) {
+  const referenceSize = await getReferenceImageSizeForDataUrls(dataUrls);
+  return referenceSize ? { ...params, size: referenceSize } : params;
+}
+
 function normalizeParamsForSystemImageModel(
   params: TaskParams,
   model?: AiImageModel | null,
@@ -190,11 +291,13 @@ function normalizeParamsForSystemImageModel(
     return nextParams;
   }
   const normalizedSize = normalizeImageSize(params.size);
+  const closestSize = getClosestImageSizeOption(normalizedSize, options)?.value;
   const size = allowedSizes.has(normalizedSize)
     ? normalizedSize
-    : defaultSize && allowedSizes.has(defaultSize)
-      ? defaultSize
-      : options[0]?.value || DEFAULT_PARAMS.size;
+    : closestSize ||
+      (defaultSize && allowedSizes.has(defaultSize)
+        ? defaultSize
+        : options[0]?.value || DEFAULT_PARAMS.size);
 
   const nextParams = {
     ...params,
@@ -1703,10 +1806,32 @@ export const useStore = create<AppState>()(
         }
 
         const state = get();
+        const agentModel = getPreferredImageAgentThinkingModel(
+          state.systemImageModels,
+          state.selectedSystemImageModelId,
+        );
+        if (!agentModel) {
+          if (
+            !state.systemImageModelsLoaded &&
+            !state.systemImageModelsLoading
+          ) {
+            void state.loadSystemImageModels();
+            state.showToast('图片模型正在加载', 'info');
+            return;
+          }
+          state.showToast(
+            getAgentThinkingModelUnavailableMessage(state),
+            'error',
+          );
+          return;
+        }
+
         const galleryInputDraft = saveGalleryInputDraft(state);
         set((state) => ({
           appMode: 'agent',
           galleryInputDraft,
+          selectedSystemImageModelId: agentModel.site_model_id,
+          params: normalizeParamsForSystemImageModel(state.params, agentModel),
           agentMobileHeaderVisible: true,
           agentSidebarCollapsed: true,
           agentAssetPanelCollapsed: true,
@@ -3643,8 +3768,12 @@ export async function submitTask(
     await storeImage(img.dataUrl);
   }
 
+  const paramsWithReferenceSize = await withReferenceImageSize(
+    params,
+    orderedInputImages,
+  );
   const normalizedParams = normalizeParamsForSystemImageModel(
-    normalizeParamsForSettings(params, requestSettings, {
+    normalizeParamsForSettings(paramsWithReferenceSize, requestSettings, {
       hasInputImages: orderedInputImages.length > 0,
     }),
     selectedSystemImageModel,
@@ -4565,6 +4694,34 @@ async function getSelectedSystemImageModel(): Promise<AiImageModel> {
   return selectedModel;
 }
 
+async function getSelectedAgentSystemImageModel(): Promise<AiImageModel> {
+  const state = useStore.getState();
+  if (!state.systemImageModelsLoaded && !state.systemImageModelsLoading) {
+    await state.loadSystemImageModels();
+  } else if (!state.systemImageModels.length) {
+    await state.loadSystemImageModels();
+  }
+
+  const latestState = useStore.getState();
+  const agentModel = getPreferredImageAgentThinkingModel(
+    latestState.systemImageModels,
+    latestState.selectedSystemImageModelId,
+  );
+  if (!agentModel) {
+    throw new Error(getAgentThinkingModelUnavailableMessage(latestState));
+  }
+  if (agentModel.site_model_id !== latestState.selectedSystemImageModelId) {
+    useStore.setState({
+      selectedSystemImageModelId: agentModel.site_model_id,
+      params: normalizeParamsForSystemImageModel(
+        latestState.params,
+        agentModel,
+      ),
+    });
+  }
+  return agentModel;
+}
+
 async function generateSystemAgentImage(opts: {
   taskId: string;
   batchItemId: string;
@@ -4579,7 +4736,7 @@ async function generateSystemAgentImage(opts: {
     const selectedModel = await getSelectedSystemImageModel();
     if (opts.signal.aborted) throw createAgentAbortError();
     const normalizedParams = normalizeParamsForSystemImageModel(
-      opts.params,
+      await withReferenceDataUrlSize(opts.params, opts.referenceImageDataUrls),
       selectedModel,
     );
 
@@ -5305,11 +5462,12 @@ async function buildAgentApiInput(
 export async function submitAgentMessage() {
   const state = useStore.getState();
   const { settings, prompt, inputImages, maskDraft, params, showToast } = state;
+
   const normalizedSettings = normalizeSettings(settings);
   const requestSettings = normalizedSettings;
   let selectedSystemImageModel: AiImageModel;
   try {
-    selectedSystemImageModel = await getSelectedSystemImageModel();
+    selectedSystemImageModel = await getSelectedAgentSystemImageModel();
   } catch (err) {
     showToast(err instanceof Error ? err.message : String(err), 'error');
     if (!state.systemImageModelsLoading) void state.loadSystemImageModels();
@@ -5404,9 +5562,13 @@ export async function submitAgentMessage() {
   const parentPath = parentRoundId
     ? getAgentRoundPath(conversation, parentRoundId)
     : [];
+  const paramsWithReferenceSize = await withReferenceImageSize(
+    params,
+    orderedInputImages,
+  );
   const normalizedParams = {
     ...normalizeParamsForSystemImageModel(
-      normalizeParamsForSettings(params, requestSettings, {
+      normalizeParamsForSettings(paramsWithReferenceSize, requestSettings, {
         hasInputImages: inputImageIds.length > 0,
       }),
       selectedSystemImageModel,
@@ -5510,11 +5672,12 @@ export async function regenerateAgentAssistantMessage(
 ) {
   const state = useStore.getState();
   const { settings, params, showToast } = state;
+
   const normalizedSettings = normalizeSettings(settings);
   const requestSettings = normalizedSettings;
   let selectedSystemImageModel: AiImageModel;
   try {
-    selectedSystemImageModel = await getSelectedSystemImageModel();
+    selectedSystemImageModel = await getSelectedAgentSystemImageModel();
   } catch (err) {
     showToast(err instanceof Error ? err.message : String(err), 'error');
     if (!state.systemImageModelsLoading) void state.loadSystemImageModels();
@@ -5542,9 +5705,18 @@ export async function regenerateAgentAssistantMessage(
   }
 
   const inputImageIds = uniqueIds(sourceRound.inputImageIds);
+  const sourceInputImages: InputImage[] = [];
+  for (const imageId of inputImageIds) {
+    const dataUrl = await ensureImageCached(imageId);
+    if (dataUrl) sourceInputImages.push({ id: imageId, dataUrl });
+  }
+  const paramsWithReferenceSize = await withReferenceImageSize(
+    params,
+    sourceInputImages,
+  );
   const normalizedParams = {
     ...normalizeParamsForSystemImageModel(
-      normalizeParamsForSettings(params, requestSettings, {
+      normalizeParamsForSettings(paramsWithReferenceSize, requestSettings, {
         hasInputImages: inputImageIds.length > 0,
       }),
       selectedSystemImageModel,
@@ -6058,9 +6230,13 @@ async function executeAgentRound(
         references,
         referenceIds,
       }: (typeof batchExecutionItems)[number]) => {
+        const batchParams = normalizeParamsForSystemImageModel(
+          await withReferenceDataUrlSize(params, references.dataUrls),
+          selectedSystemImageModel,
+        );
         const batchResult = await callBatchImageSingle({
           model: agentImageModelId,
-          params,
+          params: batchParams,
           batchItemId: item.id,
           prompt: item.prompt,
           referenceImageDataUrls: references.dataUrls,
@@ -7472,9 +7648,10 @@ export async function createInputImageFromFile(
 ): Promise<InputImage | null> {
   if (!file.type.startsWith('image/')) return null;
   const dataUrl = await fileToDataUrl(file);
+  const dimensions = await getImageDimensions(dataUrl);
   const id = await storeImage(dataUrl, 'upload');
   cacheImage(id, dataUrl);
-  return { id, dataUrl };
+  return { id, dataUrl, ...dimensions };
 }
 
 /** 添加图片到输入（右键菜单）—— 支持 data/blob/http URL */
@@ -7483,9 +7660,10 @@ export async function addImageFromUrl(src: string): Promise<void> {
   const blob = await res.blob();
   if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片');
   const dataUrl = await blobToDataUrl(blob);
+  const dimensions = await getImageDimensions(dataUrl);
   const id = await storeImage(dataUrl, 'upload');
   cacheImage(id, dataUrl);
-  useStore.getState().addInputImage({ id, dataUrl });
+  useStore.getState().addInputImage({ id, dataUrl, ...dimensions });
 }
 
 function fileToDataUrl(file: File): Promise<string> {

@@ -154,6 +154,26 @@
       background-color: rgba(var(--bs-primary-rgb), 0.13);
     }
 
+    .nav-link.expanding:not(.active) {
+      color: rgba(238, 244, 255, 0.88);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .answer-accordion-subnav .nav-link {
+      color: rgba(210, 225, 255, 0.66);
+    }
+
+    .answer-accordion-subnav .nav-link:hover {
+      color: #7fa2ff;
+      background: rgba(var(--bs-primary-rgb), 0.13);
+    }
+
+    .answer-accordion-subnav .nav-link.active {
+      color: #7fa2ff;
+      background: rgba(var(--bs-primary-rgb), 0.18);
+      box-shadow: inset 0 0 0 1px rgba(var(--bs-primary-rgb), 0.26);
+    }
+
     .nav-link:hover i,
     .nav-link.active i {
       color: #7fa2ff;

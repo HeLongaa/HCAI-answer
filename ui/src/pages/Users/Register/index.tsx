@@ -23,12 +23,15 @@ import { Trans, useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
 import { usePageTags } from '@/hooks';
-import { Unactivate, WelcomeTitle, PluginRender } from '@/components';
+import { Unactivate, PluginRender } from '@/components';
+import AuthBackButton from '@/components/AuthBackButton';
 import { guard } from '@/utils';
 import { loginSettingStore } from '@/stores';
 import { PluginType } from '@/utils/pluginKit/interface';
+import AuthBrandHeader from '../components/AuthBrandHeader';
 
 import SignUpForm from './components/SignUpForm';
+import '../Login/index.scss';
 
 const Index: React.FC = () => {
   const [showForm, setShowForm] = useState(true);
@@ -50,23 +53,30 @@ const Index: React.FC = () => {
     loginSetting.allow_email_registrations;
 
   return (
-    <Container style={{ paddingTop: '4rem', paddingBottom: '5rem' }}>
-      <WelcomeTitle />
-
+    <Container className="auth-page auth-login-page">
       {showForm ? (
-        <Col className="mx-auto" md={6} lg={4} xl={3}>
-          <PluginRender
-            type={PluginType.Connector}
-            slug_name="third_party_connector"
-            className="mb-5"
-          />
-          {showSignupForm ? <SignUpForm callback={onStep} /> : null}
-          <div className="text-center mt-5">
-            <Trans i18nKey="login.info_login" ns="translation">
-              Already have an account? <Link to="/users/login">Log in</Link>
-            </Trans>
-          </div>
-        </Col>
+        <div className="auth-shell">
+          <Col className="auth-card mx-auto" md={7} lg={5} xl={4}>
+            <AuthBackButton />
+            <AuthBrandHeader
+              title="创建账号"
+              subtitle="加入后即可使用 AI 创作、任务协作和积分权益。"
+            />
+            <div className="auth-plugin-stack">
+              <PluginRender
+                type={PluginType.Connector}
+                slug_name="third_party_connector"
+                className="auth-plugin"
+              />
+            </div>
+            {showSignupForm ? <SignUpForm callback={onStep} /> : null}
+            <div className="auth-footer">
+              <Trans i18nKey="login.info_login" ns="translation">
+                Already have an account? <Link to="/users/login">Log in</Link>
+              </Trans>
+            </div>
+          </Col>
+        </div>
       ) : (
         <Unactivate visible={!showForm} />
       )}

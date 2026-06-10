@@ -21,9 +21,12 @@ import React, { useState } from 'react';
 import { Container, Col } from 'react-bootstrap';
 import { Trans, useTranslation } from 'react-i18next';
 
+import AuthBackButton from '@/components/AuthBackButton';
 import { usePageTags } from '@/hooks';
+import AuthBrandHeader from '../components/AuthBrandHeader';
 
 import SendEmail from './components/sendEmail';
+import '../Login/index.scss';
 
 const Index: React.FC = () => {
   const { t } = useTranslation('translation', { keyPrefix: 'account_forgot' });
@@ -38,25 +41,35 @@ const Index: React.FC = () => {
     title: t('account_recovery', { keyPrefix: 'page_title' }),
   });
   return (
-    <Container style={{ paddingTop: '4rem', paddingBottom: '6rem' }}>
-      <h3 className="text-center mb-5">{t('page_title')}</h3>
+    <Container className="auth-page auth-login-page">
       {step === 1 && (
-        <Col className="mx-auto" md={6} lg={4} xl={3}>
-          <SendEmail visible={step === 1} callback={callback} />
-        </Col>
+        <div className="auth-shell">
+          <Col className="auth-card mx-auto" md={7} lg={5} xl={4}>
+            <AuthBackButton fallbackTo="/users/login" />
+            <AuthBrandHeader
+              title={t('page_title')}
+              subtitle="输入邮箱后，我们会发送一封恢复邮件帮助你重新访问账号。"
+            />
+            <SendEmail visible={step === 1} callback={callback} />
+          </Col>
+        </div>
       )}
       {step === 2 && (
-        <Col className="mx-auto px-4" md={6}>
-          <div className="text-center">
-            <p>
-              <Trans
-                i18nKey="account_forgot.send_success"
-                values={{ mail: email }}
-                components={{ bold: <strong /> }}
-              />
-            </p>
-          </div>
-        </Col>
+        <div className="auth-shell">
+          <Col className="auth-card mx-auto" md={7} lg={5} xl={4}>
+            <AuthBackButton fallbackTo="/users/login" />
+            <AuthBrandHeader title="邮件已发送" />
+            <div className="auth-success-message">
+              <p>
+                <Trans
+                  i18nKey="account_forgot.send_success"
+                  values={{ mail: email }}
+                  components={{ bold: <strong /> }}
+                />
+              </p>
+            </div>
+          </Col>
+        </div>
       )}
     </Container>
   );

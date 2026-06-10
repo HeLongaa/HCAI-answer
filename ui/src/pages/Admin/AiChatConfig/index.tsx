@@ -64,6 +64,7 @@ import {
   getAiChatProviders,
   getAiChatRedeemCodes,
   getAiChatSubscriptionPlans,
+  getAdminAiChatSetting,
   getAdminAiImageModels,
   getAdminAiImageProviders,
   getAdminAiImageSetting,
@@ -75,6 +76,7 @@ import {
   updateAiChatModelMapping,
   updateAiChatProvider,
   updateAiChatSubscriptionPlan,
+  updateAdminAiChatSetting,
   updateAdminAiImageModel,
   updateAdminAiImageProvider,
   updateAdminAiImageSetting,
@@ -139,6 +141,10 @@ const rateInit = {
   consume_rate: 1,
   enabled: true,
   remark: '',
+};
+
+const chatSettingInit = {
+  title_model_id: '',
 };
 
 const imageProviderInit = {
@@ -268,6 +274,7 @@ const redeemInit = {
 
 const tabKeys = [
   'providers',
+  'chat-settings',
   'mappings',
   'plans',
   'redeem-codes',
@@ -313,6 +320,7 @@ const AiChatConfig = () => {
   const [mappingForm, setMappingForm] = useState(mappingInit);
   const [planForm, setPlanForm] = useState(planInit);
   const [rateForm, setRateForm] = useState(rateInit);
+  const [chatSettingForm, setChatSettingForm] = useState(chatSettingInit);
   const [imageProviderForm, setImageProviderForm] = useState(imageProviderInit);
   const [imageModelForm, setImageModelForm] = useState(imageModelInit);
   const [imageSettingForm, setImageSettingForm] = useState(imageSettingInit);
@@ -367,6 +375,7 @@ const AiChatConfig = () => {
     try {
       const [
         providerData,
+        chatSettingData,
         mappingData,
         planData,
         redeemCodeData,
@@ -379,6 +388,7 @@ const AiChatConfig = () => {
         videoSettingData,
       ] = await Promise.all([
         getAiChatProviders(),
+        getAdminAiChatSetting(),
         getAiChatModelMappings(),
         getAiChatSubscriptionPlans(),
         getAiChatRedeemCodes(),
@@ -391,6 +401,7 @@ const AiChatConfig = () => {
         getAdminAiVideoSetting(),
       ]);
       setProviders(providerData || []);
+      setChatSettingForm(chatSettingData || chatSettingInit);
       setMappings(mappingData || []);
       setPlans(planData || []);
       setRedeemCodes(redeemCodeData || []);
@@ -547,6 +558,21 @@ const AiChatConfig = () => {
       await loadAll();
     } catch (err: any) {
       setError(err?.msg || '模型映射保存失败');
+    }
+  };
+
+  const submitChatSetting = async (evt: FormEvent) => {
+    evt.preventDefault();
+    setError('');
+    try {
+      const data = await updateAdminAiChatSetting({
+        title_model_id: chatSettingForm.title_model_id,
+      });
+      setChatSettingForm(data || chatSettingInit);
+      showSuccess('聊天设置已保存');
+      await loadAll();
+    } catch (err: any) {
+      setError(err?.msg || '聊天设置保存失败');
     }
   };
 
@@ -1007,6 +1033,48 @@ const AiChatConfig = () => {
               ))}
             </tbody>
           </Table>
+        </Tab>
+
+        <Tab eventKey="chat-settings" title="聊天设置">
+          <Card className="mb-4">
+            <Card.Body>
+              <Form onSubmit={submitChatSetting}>
+                <Row className="align-items-end">
+                  <Col md={5}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>会话标题生成模型</Form.Label>
+                      <Form.Select
+                        value={chatSettingForm.title_model_id}
+                        onChange={(e) =>
+                          setChatSettingForm({
+                            title_model_id: e.target.value,
+                          })
+                        }>
+                        <option value="">不自动生成标题</option>
+                        {mappings
+                          .filter((mapping) => mapping.enabled)
+                          .map((mapping) => (
+                            <option
+                              key={mapping.site_model_id}
+                              value={mapping.site_model_id}>
+                              {mapping.display_name || mapping.site_model_id}
+                            </option>
+                          ))}
+                      </Form.Select>
+                      <Form.Text>
+                        开启后会根据用户首条消息和 AI 首次回复生成对话列表标题。
+                      </Form.Text>
+                    </Form.Group>
+                  </Col>
+                  <Col md={3}>
+                    <Button type="submit" className="mb-3">
+                      保存聊天设置
+                    </Button>
+                  </Col>
+                </Row>
+              </Form>
+            </Card.Body>
+          </Card>
         </Tab>
 
         <Tab eventKey="mappings" title="模型映射">

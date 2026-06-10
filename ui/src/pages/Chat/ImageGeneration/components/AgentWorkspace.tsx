@@ -8,6 +8,8 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
+import { Avatar } from '@/components';
+import { brandingStore, loggedUserInfoStore, siteInfoStore } from '@/stores';
 import type {
   AgentMessage,
   AgentRound,
@@ -454,6 +456,9 @@ function getRoundTaskSlots(
 }
 
 export default function AgentWorkspace() {
+  const siteInfo = siteInfoStore((state) => state.siteInfo);
+  const brandingInfo = brandingStore((state) => state.branding);
+  const loggedUser = loggedUserInfoStore((state) => state.user);
   const conversations = useStore((s) => s.agentConversations);
   const conversationsLoaded = useStore((s) => s.agentConversationsLoaded);
   const activeConversationId = useStore((s) => s.activeAgentConversationId);
@@ -477,6 +482,29 @@ export default function AgentWorkspace() {
   const openFavoritePicker = useStore((s) => s.openFavoritePicker);
   const conversation =
     conversations.find((item) => item.id === activeConversationId) ?? null;
+  const siteIcon =
+    brandingInfo.square_icon ||
+    brandingInfo.favicon ||
+    brandingInfo.mobile_logo ||
+    brandingInfo.logo;
+  const renderMessageAvatar = (isAssistant: boolean) => {
+    if (isAssistant) {
+      return siteIcon ? (
+        <img src={siteIcon} alt={siteInfo.name} />
+      ) : (
+        (siteInfo.name || 'AI').slice(0, 1)
+      );
+    }
+
+    return (
+      <Avatar
+        avatar={loggedUser.avatar}
+        size="34px"
+        searchStr="s=68"
+        alt={loggedUser.display_name || loggedUser.username || '用户'}
+      />
+    );
+  };
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
@@ -640,12 +668,7 @@ export default function AgentWorkspace() {
       window.requestAnimationFrame(jumpToAgentBottom);
     });
     return () => window.cancelAnimationFrame(firstFrame);
-  }, [
-    activeMessages,
-    appMode,
-    conversation?.id,
-    jumpToAgentBottom,
-  ]);
+  }, [activeMessages, appMode, conversation?.id, jumpToAgentBottom]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(updateIsScrolledToBottom);
@@ -967,7 +990,7 @@ export default function AgentWorkspace() {
                       }}
                       className={`hcai-message hcai-agent-chat-message group mb-6 ${isAssistant ? 'assistant' : 'user'}`}>
                       <div className="hcai-message-avatar">
-                        {isAssistant ? 'AI' : '我'}
+                        {renderMessageAvatar(isAssistant)}
                       </div>
                       <div className="hcai-message-body">
                         <div className="hcai-message-meta">
@@ -1410,7 +1433,9 @@ export default function AgentWorkspace() {
                       <article
                         key={`running-${round.id}`}
                         className="hcai-message hcai-agent-chat-message assistant mb-6">
-                        <div className="hcai-message-avatar">AI</div>
+                        <div className="hcai-message-avatar">
+                          {renderMessageAvatar(true)}
+                        </div>
                         <div className="hcai-message-body">
                           <div className="hcai-message-meta">
                             <span>Agent</span>

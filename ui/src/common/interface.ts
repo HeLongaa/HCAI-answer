@@ -969,6 +969,16 @@ export interface AdminAiTestProviderModelResult {
   error?: string;
 }
 
+export interface AdminAiChatSetting {
+  title_model_id: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminAiChatSettingParams {
+  title_model_id: string;
+}
+
 export interface AiImageModel {
   id: number;
   provider_id: number;

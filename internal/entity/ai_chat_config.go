@@ -150,6 +150,15 @@ type AIChatUsageLog struct {
 
 func (AIChatUsageLog) TableName() string { return "ai_chat_usage_logs" }
 
+type AIChatSetting struct {
+	ID           int       `xorm:"not null pk INT(11) id"`
+	TitleModelID string    `xorm:"not null default '' VARCHAR(100) title_model_id"`
+	CreatedAt    time.Time `xorm:"created not null default CURRENT_TIMESTAMP TIMESTAMP created_at"`
+	UpdatedAt    time.Time `xorm:"updated not null default CURRENT_TIMESTAMP TIMESTAMP updated_at"`
+}
+
+func (AIChatSetting) TableName() string { return "ai_chat_settings" }
+
 type AIImageProvider struct {
 	ID                  int       `xorm:"not null pk autoincr INT(11) id"`
 	Name                string    `xorm:"not null default '' VARCHAR(255) name"`

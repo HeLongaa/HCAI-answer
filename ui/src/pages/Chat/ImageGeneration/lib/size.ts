@@ -9,6 +9,11 @@ const MAX_PIXELS = 8_294_400
 export type SizeTier = '1K' | '2K' | '4K'
 type PresetRatio = '1:1' | '3:2' | '2:3' | '16:9' | '9:16' | '4:3' | '3:4' | '21:9'
 
+export interface ImageSizeOptionLike {
+  value: string
+  aspect_ratio?: string
+}
+
 function roundToMultiple(value: number, multiple: number) {
   return Math.max(multiple, Math.round(value / multiple) * multiple)
 }
@@ -65,6 +70,64 @@ export function normalizeImageSize(size: string) {
 
   const { width, height } = normalizeDimensions(Number(match[1]), Number(match[2]))
   return `${width}x${height}`
+}
+
+export function normalizeImageDimensionsToSize(width: number, height: number) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return ''
+  }
+
+  const normalized = normalizeDimensions(width, height)
+  return `${normalized.width}x${normalized.height}`
+}
+
+function parseImageSizeValue(size: string) {
+  const match = size.trim().match(SIZE_PATTERN)
+  if (!match) return null
+
+  const width = Number(match[1])
+  const height = Number(match[2])
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null
+  }
+
+  return { width, height }
+}
+
+export function getClosestImageSizeOption(
+  size: string,
+  options: ImageSizeOptionLike[],
+) {
+  const target = parseImageSizeValue(normalizeImageSize(size))
+  if (!target || options.length === 0) return null
+
+  const targetRatio = target.width / target.height
+  const targetPixels = target.width * target.height
+  let bestOption: ImageSizeOptionLike | null = null
+  let bestScore = Number.POSITIVE_INFINITY
+
+  for (const option of options) {
+    const optionSize = parseImageSizeValue(option.value)
+    if (!optionSize) continue
+
+    const optionRatio = optionSize.width / optionSize.height
+    const optionPixels = optionSize.width * optionSize.height
+    const ratioError = Math.abs(optionRatio - targetRatio) / targetRatio
+    const pixelError = Math.abs(Math.log(optionPixels / targetPixels))
+    const orientationPenalty =
+      Math.sign(optionSize.width - optionSize.height) ===
+      Math.sign(target.width - target.height)
+        ? 0
+        : 1
+    const score = ratioError * 4 + pixelError + orientationPenalty
+
+    if (score < bestScore) {
+      bestScore = score
+      bestOption = option
+    }
+  }
+
+  return bestOption
 }
 
 export function parseRatio(ratio: string) {

@@ -24,7 +24,7 @@ import { Trans, useTranslation } from 'react-i18next';
 
 import { usePageTags } from '@/hooks';
 import type { LoginReqParams, FormDataType } from '@/common/interface';
-import { Unactivate, WelcomeTitle, PluginRender } from '@/components';
+import { Unactivate, PluginRender } from '@/components';
 import {
   loggedUserInfoStore,
   loginSettingStore,
@@ -40,6 +40,9 @@ import {
 import { PluginType, useCaptchaPlugin } from '@/utils/pluginKit';
 import { login, UcAgent } from '@/services';
 import { setupAppTheme } from '@/utils/localize';
+import AuthBrandHeader from '../components/AuthBrandHeader';
+
+import './index.scss';
 
 const Index: React.FC = () => {
   const { t } = useTranslation('translation', { keyPrefix: 'login' });
@@ -183,111 +186,124 @@ const Index: React.FC = () => {
   });
 
   return (
-    <Container style={{ paddingTop: '4rem', paddingBottom: '5rem' }}>
-      <WelcomeTitle />
+    <Container className="auth-page auth-login-page">
       {step === 1 ? (
-        <Col className="mx-auto" md={6} lg={4} xl={3}>
-          <PluginRender
-            type={PluginType.Captcha}
-            slug_name="captcha_basic"
-            className="mb-5"
-          />
-
-          <PluginRender
-            type={PluginType.Captcha}
-            slug_name="captcha_google_v2"
-            className="mb-5"
-          />
-          {ucAgentInfo ? (
-            <PluginRender
-              type={PluginType.Connector}
-              slug_name="hosting_connector"
-              className="mb-5"
+        <div className="auth-shell">
+          <Col className="auth-card mx-auto" md={7} lg={5} xl={4}>
+            <AuthBrandHeader
+              title="欢迎回来"
+              subtitle="登录后继续使用智能对话、创作工具和任务协作能力。"
             />
-          ) : (
-            <PluginRender
-              type={PluginType.Connector}
-              slug_name="third_party_connector"
-              className="mb-5"
-            />
-          )}
-          {canOriginalLogin ? (
-            <>
-              <Form noValidate onSubmit={handleSubmit}>
-                <Form.Group controlId="email" className="mb-3">
-                  <Form.Label>{t('email.label')}</Form.Label>
-                  <Form.Control
-                    required
-                    tabIndex={1}
-                    type="email"
-                    value={formData.e_mail.value}
-                    isInvalid={formData.e_mail.isInvalid}
-                    onChange={(e) =>
-                      handleChange({
-                        e_mail: {
-                          value: e.target.value,
-                          isInvalid: false,
-                          errorMsg: '',
-                        },
-                      })
-                    }
-                  />
-                  <Form.Control.Feedback type="invalid">
-                    {formData.e_mail.errorMsg}
-                  </Form.Control.Feedback>
-                </Form.Group>
 
-                <Form.Group controlId="pass" className="mb-3">
-                  <div className="d-flex justify-content-between">
-                    <Form.Label>{t('password.label')}</Form.Label>
-                    <Link to="/users/account-recovery" tabIndex={2}>
-                      <small>{t('forgot_pass')}</small>
-                    </Link>
-                  </div>
+            <div className="auth-plugin-stack">
+              <PluginRender
+                type={PluginType.Captcha}
+                slug_name="captcha_basic"
+                className="auth-plugin"
+              />
 
-                  <Form.Control
-                    required
-                    tabIndex={1}
-                    type="password"
-                    // value={formData.pass.value}
-                    isInvalid={formData.pass.isInvalid}
-                    onChange={(e) =>
-                      handleChange({
-                        pass: {
-                          value: e.target.value,
-                          isInvalid: false,
-                          errorMsg: '',
-                        },
-                      })
-                    }
-                  />
-                  <Form.Control.Feedback type="invalid">
-                    {formData.pass.errorMsg}
-                  </Form.Control.Feedback>
-                </Form.Group>
-
-                <div className="d-grid">
-                  <Button variant="primary" type="submit" tabIndex={1}>
-                    {t('login', { keyPrefix: 'btns' })}
-                  </Button>
-                </div>
-              </Form>
-              {loginSetting.allow_new_registrations && (
-                <div className="text-center mt-5">
-                  <Trans i18nKey="login.info_sign" ns="translation">
-                    Don't have an account?
-                    <Link
-                      to={userCenter.getSignUpUrl()}
-                      tabIndex={2}
-                      onClick={floppyNavigation.handleRouteLinkClick}>
-                      Sign up
-                    </Link>
-                  </Trans>
-                </div>
+              <PluginRender
+                type={PluginType.Captcha}
+                slug_name="captcha_google_v2"
+                className="auth-plugin"
+              />
+              {ucAgentInfo ? (
+                <PluginRender
+                  type={PluginType.Connector}
+                  slug_name="hosting_connector"
+                  className="auth-plugin"
+                />
+              ) : (
+                <PluginRender
+                  type={PluginType.Connector}
+                  slug_name="third_party_connector"
+                  className="auth-plugin"
+                />
               )}
-            </>
-          ) : null}
-        </Col>
+            </div>
+
+            {canOriginalLogin ? (
+              <>
+                <Form className="auth-form" noValidate onSubmit={handleSubmit}>
+                  <Form.Group controlId="email" className="auth-field">
+                    <Form.Label>{t('email.label')}</Form.Label>
+                    <Form.Control
+                      required
+                      tabIndex={1}
+                      type="email"
+                      value={formData.e_mail.value}
+                      isInvalid={formData.e_mail.isInvalid}
+                      onChange={(e) =>
+                        handleChange({
+                          e_mail: {
+                            value: e.target.value,
+                            isInvalid: false,
+                            errorMsg: '',
+                          },
+                        })
+                      }
+                    />
+                    <Form.Control.Feedback type="invalid">
+                      {formData.e_mail.errorMsg}
+                    </Form.Control.Feedback>
+                  </Form.Group>
+
+                  <Form.Group controlId="pass" className="auth-field">
+                    <div className="auth-field-head">
+                      <Form.Label>{t('password.label')}</Form.Label>
+                      <Link to="/users/account-recovery" tabIndex={2}>
+                        {t('forgot_pass')}
+                      </Link>
+                    </div>
+
+                    <Form.Control
+                      required
+                      tabIndex={1}
+                      type="password"
+                      // value={formData.pass.value}
+                      isInvalid={formData.pass.isInvalid}
+                      onChange={(e) =>
+                        handleChange({
+                          pass: {
+                            value: e.target.value,
+                            isInvalid: false,
+                            errorMsg: '',
+                          },
+                        })
+                      }
+                    />
+                    <Form.Control.Feedback type="invalid">
+                      {formData.pass.errorMsg}
+                    </Form.Control.Feedback>
+                  </Form.Group>
+
+                  <div className="d-grid">
+                    <Button
+                      className="auth-submit"
+                      variant="primary"
+                      type="submit"
+                      tabIndex={1}>
+                      {t('login', { keyPrefix: 'btns' })}
+                    </Button>
+                  </div>
+                </Form>
+                {loginSetting.allow_new_registrations && (
+                  <div className="auth-footer">
+                    <Trans i18nKey="login.info_sign" ns="translation">
+                      Don't have an account?
+                      <Link
+                        to={userCenter.getSignUpUrl()}
+                        tabIndex={2}
+                        onClick={floppyNavigation.handleRouteLinkClick}>
+                        Sign up
+                      </Link>
+                    </Trans>
+                  </div>
+                )}
+              </>
+            ) : null}
+          </Col>
+        </div>
       ) : null}
 
       {step === 2 && <Unactivate visible={step === 2} />}

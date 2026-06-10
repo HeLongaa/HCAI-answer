@@ -158,6 +158,10 @@ export interface InputImage {
   id: string;
   /** data URL，用于预览 */
   dataUrl: string;
+  /** 原始图片宽度，用于参考图生图时自动匹配尺寸 */
+  width?: number;
+  /** 原始图片高度，用于参考图生图时自动匹配尺寸 */
+  height?: number;
 }
 
 export interface MaskDraft {

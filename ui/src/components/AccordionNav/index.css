@@ -57,6 +57,35 @@
       color 180ms ease;
   }
 
+  .answer-accordion-subnav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+    padding-left: 22px;
+  }
+
+  .answer-accordion-subnav .nav-link {
+    min-height: 32px;
+    padding: 0 9px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 620;
+    color: rgba(45, 59, 82, 0.78);
+  }
+
+  .answer-accordion-subnav .nav-link:hover {
+    color: var(--bs-primary);
+    background: rgba(var(--bs-primary-rgb), 0.08);
+  }
+
+  .answer-accordion-subnav .nav-link.active {
+    color: var(--bs-primary);
+    background: rgba(var(--bs-primary-rgb), 0.11);
+    box-shadow: inset 0 0 0 1px rgba(var(--bs-primary-rgb), 0.16);
+  }
+
   .nav-link i:not(.collapse-indicator) {
     width: 18px;
     color: #314156;
@@ -75,6 +104,11 @@
   .nav-link:hover {
     color: var(--bs-primary);
     background-color: rgba(255, 255, 255, 0.46);
+  }
+
+  .nav-link.expanding:not(.active) {
+    color: #203047;
+    background: rgba(255, 255, 255, 0.38);
   }
 
   .nav-link.active {

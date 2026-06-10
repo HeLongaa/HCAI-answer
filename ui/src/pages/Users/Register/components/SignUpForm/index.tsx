@@ -170,8 +170,12 @@ const Index: React.FC<Props> = ({ callback }) => {
 
   return (
     <>
-      <Form noValidate onSubmit={handleSubmit} autoComplete="off">
-        <Form.Group controlId="name" className="mb-3">
+      <Form
+        className="auth-form"
+        noValidate
+        onSubmit={handleSubmit}
+        autoComplete="off">
+        <Form.Group controlId="name" className="auth-field">
           <Form.Label>{t('name.label')}</Form.Label>
           <Form.Control
             autoComplete="off"
@@ -193,7 +197,7 @@ const Index: React.FC<Props> = ({ callback }) => {
             {formData.name.errorMsg}
           </Form.Control.Feedback>
         </Form.Group>
-        <Form.Group controlId="email" className="mb-3">
+        <Form.Group controlId="email" className="auth-field">
           <Form.Label>{t('email.label')}</Form.Label>
           <Form.Control
             autoComplete="off"
@@ -216,7 +220,7 @@ const Index: React.FC<Props> = ({ callback }) => {
           </Form.Control.Feedback>
         </Form.Group>
 
-        <Form.Group controlId="password" className="mb-3">
+        <Form.Group controlId="password" className="auth-field">
           <Form.Label>{t('password.label')}</Form.Label>
           <Form.Control
             autoComplete="off"
@@ -240,12 +244,12 @@ const Index: React.FC<Props> = ({ callback }) => {
         </Form.Group>
 
         <div className="d-grid">
-          <Button variant="primary" type="submit">
+          <Button className="auth-submit" variant="primary" type="submit">
             {t('signup', { keyPrefix: 'btns' })}
           </Button>
         </div>
       </Form>
-      <div className="text-center small mt-3">
+      <div className="auth-agreement">
         <Trans i18nKey="login.agreements" ns="translation">
           By registering, you agree to the
           <Link

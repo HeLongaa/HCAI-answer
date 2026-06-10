@@ -116,6 +116,11 @@ export const ADMIN_NAV_MENUS = [
         path: 'ai-chat-config/providers',
       },
       {
+        name: 'ai_chat_config_chat_settings',
+        displayName: '聊天设置',
+        path: 'ai-chat-config/chat-settings',
+      },
+      {
         name: 'ai_chat_config_mappings',
         displayName: '模型映射',
         path: 'ai-chat-config/mappings',

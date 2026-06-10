@@ -78,6 +78,16 @@ export const deleteAiChatModelMapping = (id: number) => {
   return request.delete(`${base}/model-mappings/${id}`);
 };
 
+export const getAdminAiChatSetting = () => {
+  return request.get<Type.AdminAiChatSetting>(`${base}/chat-setting`);
+};
+
+export const updateAdminAiChatSetting = (
+  params: Type.AdminAiChatSettingParams,
+) => {
+  return request.put(`${base}/chat-setting`, params);
+};
+
 export const getAiChatSubscriptionPlans = () => {
   return request.get<Type.AiSubscriptionPlan[]>(`${base}/subscription-plans`);
 };

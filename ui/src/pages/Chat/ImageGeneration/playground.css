@@ -432,8 +432,11 @@ body.drag-selecting * {
   font-weight: 850;
   line-height: 1;
   color: #58677c !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.46)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.72),
+      rgba(255, 255, 255, 0.46)
+    ),
     rgba(255, 255, 255, 0.5) !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.64),
@@ -449,8 +452,7 @@ body.drag-selecting * {
 .hcai-confirm-dialog .hcai-confirm-dialog-button:hover:not(:disabled) {
   color: var(--bs-primary) !important;
   border-color: rgba(var(--bs-primary-rgb), 0.24) !important;
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       rgba(var(--bs-primary-rgb), 0.12),
       rgba(var(--bs-primary-rgb), 0.06)
@@ -477,8 +479,7 @@ body.drag-selecting * {
 .hcai-confirm-dialog .hcai-confirm-dialog-button-primary {
   color: var(--bs-primary) !important;
   border-color: rgba(var(--bs-primary-rgb), 0.24) !important;
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       rgba(var(--bs-primary-rgb), 0.14),
       rgba(var(--bs-primary-rgb), 0.08)
@@ -489,8 +490,11 @@ body.drag-selecting * {
 .hcai-confirm-dialog .hcai-confirm-dialog-button-danger {
   color: #c6354b !important;
   border-color: rgba(214, 54, 75, 0.26) !important;
-  background:
-    linear-gradient(180deg, rgba(214, 54, 75, 0.12), rgba(214, 54, 75, 0.07)),
+  background: linear-gradient(
+      180deg,
+      rgba(214, 54, 75, 0.12),
+      rgba(214, 54, 75, 0.07)
+    ),
     rgba(255, 255, 255, 0.54) !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.64),
@@ -500,8 +504,11 @@ body.drag-selecting * {
 .hcai-confirm-dialog .hcai-confirm-dialog-button-danger:hover:not(:disabled) {
   color: #b92d42 !important;
   border-color: rgba(214, 54, 75, 0.36) !important;
-  background:
-    linear-gradient(180deg, rgba(214, 54, 75, 0.16), rgba(214, 54, 75, 0.09)),
+  background: linear-gradient(
+      180deg,
+      rgba(214, 54, 75, 0.16),
+      rgba(214, 54, 75, 0.09)
+    ),
     rgba(255, 255, 255, 0.58) !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.7),
@@ -511,16 +518,22 @@ body.drag-selecting * {
 .hcai-confirm-dialog .hcai-confirm-dialog-button-warning {
   color: #b46a14 !important;
   border-color: rgba(194, 116, 24, 0.28) !important;
-  background:
-    linear-gradient(180deg, rgba(194, 116, 24, 0.13), rgba(194, 116, 24, 0.07)),
+  background: linear-gradient(
+      180deg,
+      rgba(194, 116, 24, 0.13),
+      rgba(194, 116, 24, 0.07)
+    ),
     rgba(255, 255, 255, 0.54) !important;
 }
 
 [data-bs-theme='dark'] .hcai-confirm-dialog .hcai-confirm-dialog-button {
   color: rgba(222, 231, 244, 0.78) !important;
   border-color: rgba(210, 225, 255, 0.14) !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.08),
+      rgba(255, 255, 255, 0.04)
+    ),
     rgba(17, 25, 37, 0.72) !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
@@ -532,8 +545,7 @@ body.drag-selecting * {
   .hcai-confirm-dialog-button:hover:not(:disabled) {
   color: #d8e6ff !important;
   border-color: rgba(var(--bs-primary-rgb), 0.34) !important;
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       rgba(var(--bs-primary-rgb), 0.2),
       rgba(var(--bs-primary-rgb), 0.1)
@@ -544,11 +556,12 @@ body.drag-selecting * {
     0 12px 26px rgba(0, 0, 0, 0.3);
 }
 
-[data-bs-theme='dark'] .hcai-confirm-dialog .hcai-confirm-dialog-button-primary {
+[data-bs-theme='dark']
+  .hcai-confirm-dialog
+  .hcai-confirm-dialog-button-primary {
   color: #d8e6ff !important;
   border-color: rgba(var(--bs-primary-rgb), 0.34) !important;
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       rgba(var(--bs-primary-rgb), 0.22),
       rgba(var(--bs-primary-rgb), 0.11)
@@ -559,8 +572,11 @@ body.drag-selecting * {
 [data-bs-theme='dark'] .hcai-confirm-dialog .hcai-confirm-dialog-button-danger {
   color: #ffb7c2 !important;
   border-color: rgba(255, 112, 132, 0.3) !important;
-  background:
-    linear-gradient(180deg, rgba(255, 112, 132, 0.18), rgba(255, 112, 132, 0.08)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 112, 132, 0.18),
+      rgba(255, 112, 132, 0.08)
+    ),
     rgba(30, 20, 28, 0.76) !important;
 }
 
@@ -569,8 +585,11 @@ body.drag-selecting * {
   .hcai-confirm-dialog-button-danger:hover:not(:disabled) {
   color: #ffd1d8 !important;
   border-color: rgba(255, 112, 132, 0.42) !important;
-  background:
-    linear-gradient(180deg, rgba(255, 112, 132, 0.22), rgba(255, 112, 132, 0.11)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 112, 132, 0.22),
+      rgba(255, 112, 132, 0.11)
+    ),
     rgba(34, 22, 31, 0.78) !important;
 }
 
@@ -934,6 +953,17 @@ body.drag-selecting * {
 
 #image-playground.hcai-image-playground-shell
   .hcai-agent-chat-message
+  .hcai-message-avatar
+  img {
+  display: block;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: contain;
+}
+
+#image-playground.hcai-image-playground-shell
+  .hcai-agent-chat-message
   .hcai-message-body {
   display: grid;
   gap: 5px;
@@ -1282,8 +1312,7 @@ body.drag-selecting * {
   height: 46px;
   padding: 4px !important;
   border: 0 !important;
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       rgba(255, 255, 255, 0.72),
       rgba(255, 255, 255, 0.42)
@@ -1340,6 +1369,45 @@ body.drag-selecting * {
 
 #image-playground.hcai-image-playground-shell
   .hcai-playground-mode-switch
+  .hcai-playground-agent-tab-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+#image-playground.hcai-image-playground-shell
+  .hcai-playground-mode-switch
+  .hcai-playground-agent-beta {
+  position: absolute;
+  top: -7px;
+  right: -10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  pointer-events: none;
+  transform: rotate(10deg);
+  transform-origin: center;
+  background: linear-gradient(
+      180deg,
+      rgba(255, 244, 214, 0.96),
+      rgba(255, 198, 93, 0.96)
+    ),
+    #f5a524;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 5px 12px rgba(197, 112, 0, 0.22);
+  color: #6f3b00;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+#image-playground.hcai-image-playground-shell
+  .hcai-playground-mode-switch
   button:focus {
   outline: none;
 }
@@ -1362,8 +1430,7 @@ body.drag-selecting * {
   button.is-active {
   color: var(--an-navbar-accent, var(--bs-primary)) !important;
   border: 0;
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       rgba(var(--bs-primary-rgb), 0.13),
       rgba(var(--bs-primary-rgb), 0.08)
@@ -1572,9 +1639,7 @@ body.drag-selecting * {
 #image-playground.hcai-image-playground-shell
   [data-favorite-collections-root]
   .hcai-favorite-action-button,
-#image-playground
-  [data-no-drag-select]
-  .hcai-favorite-action-button {
+#image-playground [data-no-drag-select] .hcai-favorite-action-button {
   -webkit-appearance: none;
   appearance: none;
   display: inline-flex;
@@ -1608,9 +1673,7 @@ body.drag-selecting * {
 #image-playground.hcai-image-playground-shell
   [data-favorite-collections-root]
   .hcai-favorite-action-button:focus,
-#image-playground
-  [data-no-drag-select]
-  .hcai-favorite-action-button:focus {
+#image-playground [data-no-drag-select] .hcai-favorite-action-button:focus {
   outline: none;
 }
 
@@ -1626,16 +1689,12 @@ body.drag-selecting * {
 #image-playground.hcai-image-playground-shell
   [data-favorite-collections-root]
   .hcai-favorite-action-button:disabled,
-#image-playground
-  [data-no-drag-select]
-  .hcai-favorite-action-button:disabled {
+#image-playground [data-no-drag-select] .hcai-favorite-action-button:disabled {
   cursor: not-allowed;
   opacity: 0.38;
 }
 
-#image-playground.hcai-image-playground-shell
-  .hcai-favorite-action-button
-  svg {
+#image-playground.hcai-image-playground-shell .hcai-favorite-action-button svg {
   width: 16px;
   height: 16px;
   flex: 0 0 16px;
@@ -1968,8 +2027,7 @@ body.drag-selecting * {
   #image-playground.hcai-image-playground-shell
   .hcai-playground-mode-switch {
   border: 0 !important;
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       rgba(38, 51, 70, 0.82),
       rgba(17, 27, 41, 0.72)
@@ -1987,8 +2045,7 @@ body.drag-selecting * {
   .hcai-playground-mode-switch
   button.is-active {
   color: #9cb6ff !important;
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       rgba(var(--bs-primary-rgb), 0.3),
       rgba(var(--bs-primary-rgb), 0.18)
@@ -2014,6 +2071,22 @@ body.drag-selecting * {
   button:not(.is-active):hover {
   color: #9cb6ff !important;
   background: rgba(var(--bs-primary-rgb), 0.15) !important;
+}
+
+[data-bs-theme='dark']
+  #image-playground.hcai-image-playground-shell
+  .hcai-playground-mode-switch
+  .hcai-playground-agent-beta {
+  background: linear-gradient(
+      180deg,
+      rgba(255, 211, 118, 0.98),
+      rgba(219, 126, 25, 0.98)
+    ),
+    #d97706;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 244, 214, 0.32),
+    0 6px 14px rgba(0, 0, 0, 0.32);
+  color: #2b1600;
 }
 
 [data-bs-theme='dark']
@@ -2973,8 +3046,11 @@ body > [data-no-drag-select].fixed.inset-0 .rounded-2xl {
   padding: 2px !important;
   border: 1px solid rgba(120, 137, 160, 0.18);
   border-radius: 999px !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.42)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.68),
+      rgba(255, 255, 255, 0.42)
+    ),
     rgba(120, 137, 160, 0.2) !important;
   box-shadow:
     inset 0 1px 1px rgba(18, 32, 54, 0.08),
@@ -2988,8 +3064,11 @@ body > [data-no-drag-select].fixed.inset-0 .rounded-2xl {
 
 .hcai-settings-modal .hcai-settings-switch.is-on {
   border-color: rgba(var(--bs-primary-rgb), 0.34);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.16),
+      rgba(255, 255, 255, 0)
+    ),
     rgba(var(--bs-primary-rgb), 0.86) !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.26),
@@ -3030,8 +3109,11 @@ body > [data-no-drag-select].fixed.inset-0 .rounded-2xl {
 [data-bs-theme='light'] .hcai-settings-modal .hcai-settings-modal-panel {
   color: #18263a !important;
   border-color: rgba(120, 137, 160, 0.18) !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 251, 255, 0.84)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.92),
+      rgba(248, 251, 255, 0.84)
+    ),
     rgba(255, 255, 255, 0.88) !important;
   box-shadow:
     0 24px 70px rgba(31, 42, 58, 0.18),
@@ -3161,8 +3243,12 @@ body > [data-no-drag-select].fixed.inset-0 .rounded-2xl {
 [data-bs-theme='light'] .hcai-settings-modal .hover\:bg-white:hover,
 [data-bs-theme='light'] .hcai-settings-modal .hover\:bg-gray-50:hover,
 [data-bs-theme='light'] .hcai-settings-modal .hover\:bg-gray-100:hover,
-[data-bs-theme='light'] .hcai-settings-modal .dark\:hover\:bg-white\/\[0\.06\]:hover,
-[data-bs-theme='light'] .hcai-settings-modal .dark\:hover\:bg-white\/\[0\.08\]:hover {
+[data-bs-theme='light']
+  .hcai-settings-modal
+  .dark\:hover\:bg-white\/\[0\.06\]:hover,
+[data-bs-theme='light']
+  .hcai-settings-modal
+  .dark\:hover\:bg-white\/\[0\.08\]:hover {
   background-color: rgba(var(--bs-primary-rgb), 0.08) !important;
 }
 
@@ -3180,8 +3266,11 @@ body > [data-no-drag-select].fixed.inset-0 .rounded-2xl {
 
 [data-bs-theme='light'] .hcai-settings-modal .hcai-settings-switch {
   border-color: rgba(120, 137, 160, 0.18) !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.42)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.68),
+      rgba(255, 255, 255, 0.42)
+    ),
     rgba(120, 137, 160, 0.2) !important;
   box-shadow:
     inset 0 1px 1px rgba(18, 32, 54, 0.08),
@@ -3190,8 +3279,11 @@ body > [data-no-drag-select].fixed.inset-0 .rounded-2xl {
 
 [data-bs-theme='light'] .hcai-settings-modal .hcai-settings-switch.is-on {
   border-color: rgba(var(--bs-primary-rgb), 0.34) !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.16),
+      rgba(255, 255, 255, 0)
+    ),
     rgba(var(--bs-primary-rgb), 0.86) !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.26),
@@ -3206,22 +3298,21 @@ body > [data-no-drag-select].fixed.inset-0 .rounded-2xl {
     inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
 }
 
-[data-bs-theme='light']
-  .hcai-settings-modal
-  .hcai-playground-select-menu {
+[data-bs-theme='light'] .hcai-settings-modal .hcai-playground-select-menu {
   color: #31405a !important;
   border-color: rgba(120, 137, 160, 0.18) !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 251, 255, 0.86)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.94),
+      rgba(248, 251, 255, 0.86)
+    ),
     rgba(255, 255, 255, 0.9) !important;
   box-shadow:
     0 18px 46px rgba(18, 32, 54, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.7) !important;
 }
 
-[data-bs-theme='light']
-  .hcai-settings-modal
-  .hcai-playground-select-option {
+[data-bs-theme='light'] .hcai-settings-modal .hcai-playground-select-option {
   color: #31405a !important;
 }
 
@@ -3241,8 +3332,11 @@ body > [data-no-drag-select].fixed.inset-0 .rounded-2xl {
 
 [data-bs-theme='dark'] .hcai-settings-modal .hcai-settings-switch {
   border-color: rgba(210, 225, 255, 0.14);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.08),
+      rgba(255, 255, 255, 0.02)
+    ),
     rgba(24, 33, 47, 0.78) !important;
   box-shadow:
     inset 0 1px 1px rgba(0, 0, 0, 0.24),
@@ -3251,8 +3345,11 @@ body > [data-no-drag-select].fixed.inset-0 .rounded-2xl {
 
 [data-bs-theme='dark'] .hcai-settings-modal .hcai-settings-switch.is-on {
   border-color: rgba(var(--bs-primary-rgb), 0.42);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.12),
+      rgba(255, 255, 255, 0)
+    ),
     rgba(var(--bs-primary-rgb), 0.72) !important;
 }
 
@@ -3376,8 +3473,11 @@ body > .hcai-zip-route-manager-overlay > .hcai-zip-route-manager-panel {
   max-width: min(520px, calc(100vw - 32px)) !important;
   border: 1px solid rgba(120, 137, 160, 0.18) !important;
   border-radius: 22px !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 251, 255, 0.82)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.9),
+      rgba(248, 251, 255, 0.82)
+    ),
     rgba(255, 255, 255, 0.86) !important;
   box-shadow:
     0 24px 70px rgba(31, 42, 58, 0.18),
@@ -3404,9 +3504,7 @@ body > .hcai-zip-route-manager-overlay > .hcai-zip-route-manager-panel {
   font-size: 0.9rem;
 }
 
-body
-  > .hcai-zip-route-manager-overlay
-  .hcai-zip-route-manager-close {
+body > .hcai-zip-route-manager-overlay .hcai-zip-route-manager-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3419,9 +3517,7 @@ body
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
 }
 
-body
-  > .hcai-zip-route-manager-overlay
-  .hcai-zip-route-manager-close:hover {
+body > .hcai-zip-route-manager-overlay .hcai-zip-route-manager-close:hover {
   color: var(--bs-primary) !important;
   border-color: rgba(var(--bs-primary-rgb), 0.22) !important;
   background: rgba(var(--bs-primary-rgb), 0.08) !important;
@@ -3434,8 +3530,11 @@ body
 .hcai-zip-route-option {
   border-color: rgba(120, 137, 160, 0.16) !important;
   border-radius: 16px !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.42)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.68),
+      rgba(255, 255, 255, 0.42)
+    ),
     rgba(247, 250, 255, 0.74) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.54);
 }
@@ -3492,14 +3591,15 @@ body
   padding: 14px 24px 24px !important;
 }
 
-body
-  > .hcai-zip-route-manager-overlay
-  .hcai-zip-route-manager-done {
+body > .hcai-zip-route-manager-overlay .hcai-zip-route-manager-done {
   min-height: 40px;
   border: 1px solid rgba(var(--bs-primary-rgb), 0.4) !important;
   border-radius: 12px !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.16),
+      rgba(255, 255, 255, 0)
+    ),
     var(--bs-primary) !important;
   color: #fff !important;
   box-shadow:
@@ -3507,12 +3607,13 @@ body
     inset 0 1px 0 rgba(255, 255, 255, 0.28) !important;
 }
 
-body
-  > .hcai-zip-route-manager-overlay
-  .hcai-zip-route-manager-done:hover {
+body > .hcai-zip-route-manager-overlay .hcai-zip-route-manager-done:hover {
   border-color: rgba(var(--bs-primary-rgb), 0.56) !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.02)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.2),
+      rgba(255, 255, 255, 0.02)
+    ),
     rgb(var(--bs-primary-rgb)) !important;
   transform: translateY(-1px);
 }
@@ -3529,8 +3630,11 @@ body
   > .hcai-zip-route-manager-overlay
   > .hcai-zip-route-manager-panel {
   border-color: rgba(210, 225, 255, 0.15) !important;
-  background:
-    linear-gradient(180deg, rgba(29, 40, 58, 0.94), rgba(18, 26, 38, 0.92)),
+  background: linear-gradient(
+      180deg,
+      rgba(29, 40, 58, 0.94),
+      rgba(18, 26, 38, 0.92)
+    ),
     rgba(18, 26, 38, 0.92) !important;
   color: rgba(238, 244, 255, 0.9);
   box-shadow:
@@ -3568,8 +3672,11 @@ body
 
 [data-bs-theme='dark'] .hcai-zip-route-option {
   border-color: rgba(201, 218, 247, 0.13) !important;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025)),
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.055),
+      rgba(255, 255, 255, 0.025)
+    ),
     rgba(255, 255, 255, 0.04) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
@@ -4182,20 +4289,25 @@ body
   min-width: 28px;
   height: 14px;
   padding: 0 5px;
-  border: 1px solid rgba(65, 94, 255, 0.26);
+  border: 0;
   border-radius: 999px;
-  color: #3157d5;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(235, 240, 255, 0.72)),
-    rgba(236, 241, 255, 0.82);
+  color: #6f3b00;
+  background: linear-gradient(
+      180deg,
+      rgba(255, 244, 214, 0.96),
+      rgba(255, 198, 93, 0.96)
+    ),
+    #f5a524;
   box-shadow:
-    0 3px 8px rgba(40, 76, 180, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 5px 12px rgba(197, 112, 0, 0.22);
   font-size: 8px;
   font-weight: 850;
   line-height: 1;
   letter-spacing: 0;
   pointer-events: none;
+  transform: rotate(8deg);
+  transform-origin: center;
 }
 
 .hcai-size-picker-input {
@@ -4468,14 +4580,16 @@ body
 }
 
 [data-bs-theme='dark'] .hcai-size-picker-beta-badge {
-  color: #b9c9ff;
-  border-color: rgba(152, 178, 255, 0.28);
-  background:
-    linear-gradient(180deg, rgba(71, 91, 148, 0.74), rgba(48, 63, 104, 0.68)),
-    rgba(43, 55, 91, 0.78);
+  color: #2b1600;
+  background: linear-gradient(
+      180deg,
+      rgba(255, 211, 118, 0.98),
+      rgba(219, 126, 25, 0.98)
+    ),
+    #d97706;
   box-shadow:
-    0 3px 9px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    inset 0 1px 0 rgba(255, 244, 214, 0.32),
+    0 6px 14px rgba(0, 0, 0, 0.32);
 }
 
 [data-bs-theme='dark'] .hcai-size-picker-input:focus {

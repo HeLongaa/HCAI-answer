@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
-import { initStore } from './store';
-import { useStore } from './store';
+import { hasAnyImageAgentThinkingModel, initStore, useStore } from './store';
 import {
   buildSettingsFromUrlParams,
   clearUrlSettingParams,
@@ -58,6 +57,10 @@ export default function App({ embedded = false }: AppProps) {
     (s) => s.loadSystemImageGenerations,
   );
   const appMode = useStore((s) => s.appMode);
+  const setAppMode = useStore((s) => s.setAppMode);
+  const systemImageModels = useStore((s) => s.systemImageModels);
+  const systemImageModelsLoaded = useStore((s) => s.systemImageModelsLoaded);
+  const systemImageModelsLoading = useStore((s) => s.systemImageModelsLoading);
   const hasRunningGalleryTasks = useStore((s) =>
     s.tasks.some(
       (task) =>
@@ -116,6 +119,23 @@ export default function App({ embedded = false }: AppProps) {
       cancelled = true;
     };
   }, [loadSystemImageGenerations, loadSystemImageModels, setSettings]);
+
+  useEffect(() => {
+    if (
+      appMode === 'agent' &&
+      systemImageModelsLoaded &&
+      !systemImageModelsLoading &&
+      !hasAnyImageAgentThinkingModel(systemImageModels)
+    ) {
+      setAppMode('gallery');
+    }
+  }, [
+    appMode,
+    setAppMode,
+    systemImageModels,
+    systemImageModelsLoaded,
+    systemImageModelsLoading,
+  ]);
 
   useEffect(() => {
     if (!hasRunningGalleryTasks) return;

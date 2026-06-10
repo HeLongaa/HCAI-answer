@@ -17,10 +17,10 @@
  * under the License.
  */
 
-import React, { FC, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Accordion, Nav } from 'react-bootstrap';
+import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
+import { Nav } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useMatch, NavLink } from 'react-router-dom';
+import { useLocation, useNavigate, NavLink } from 'react-router-dom';
 
 import classNames from 'classnames';
 
@@ -43,12 +43,14 @@ function MenuNode({
   callback,
   activeKey,
   expanding = false,
+  depth = 0,
   path = '/',
 }: {
   menu: MenuItem;
   callback: (evt: any, menu: MenuItem, href: string, isLeaf: boolean) => void;
   activeKey: string;
   expanding?: boolean;
+  depth?: number;
   path?: string;
 }) {
   const { t } = useTranslation('translation', { keyPrefix: 'nav_menus' });
@@ -71,6 +73,7 @@ function MenuNode({
           }}
           className={classNames(
             'text-nowrap d-flex flex-nowrap align-items-center w-100',
+            `answer-accordion-depth-${depth}`,
             {
               expanding,
               active: isActive,
@@ -98,6 +101,7 @@ function MenuNode({
           }}
           className={classNames(
             'text-nowrap d-flex flex-nowrap align-items-center w-100',
+            `answer-accordion-depth-${depth}`,
             {
               expanding,
               active: isActive,
@@ -117,8 +121,8 @@ function MenuNode({
       )}
 
       {menu.children && menu.children.length > 0 ? (
-        <Accordion.Collapse eventKey={menu.path || menu.name} className="ms-4">
-          <>
+        expanding ? (
+          <div className="answer-accordion-subnav">
             {menu.children.map((leaf) => {
               return (
                 <MenuNode
@@ -126,12 +130,13 @@ function MenuNode({
                   callback={callback}
                   activeKey={activeKey}
                   path={path}
+                  depth={depth + 1}
                   key={leaf.path || leaf.name}
                 />
               );
             })}
-          </>
-        </Accordion.Collapse>
+          </div>
+        ) : null
       ) : null}
     </Nav.Item>
   );
@@ -148,7 +153,7 @@ const AccordionNav: FC<AccordionProps> = ({
   path = '/',
 }) => {
   const navigate = useNavigate();
-  const pathMatch = useMatch(`${path}*`);
+  const location = useLocation();
   // auto set menu fields
   const normalizedMenus = useMemo(() => {
     return menus.map((menu) => {
@@ -183,18 +188,30 @@ const AccordionNav: FC<AccordionProps> = ({
     });
   });
 
-  const splat = pathMatch && pathMatch.params['*'];
-  let activeKey: string =
-    normalizedMenus[0]?.path || normalizedMenus[0]?.name || '';
-
-  if (splat) {
-    activeKey = splat;
-  }
+  const activeKey = useMemo(() => {
+    const basePath = path.endsWith('/') ? path : `${path}/`;
+    const locationPath = location.pathname.replace(/^\/+/, '');
+    const normalizedBasePath = basePath.replace(/^\/+/, '');
+    const nextActiveKey = locationPath.startsWith(normalizedBasePath)
+      ? locationPath.slice(normalizedBasePath.length)
+      : '';
+    return (
+      nextActiveKey ||
+      normalizedMenus[0]?.path ||
+      normalizedMenus[0]?.name ||
+      ''
+    );
+  }, [location.pathname, normalizedMenus, path]);
 
   const matchedOpenKey = useMemo(() => {
     let nextOpenKey = '';
     normalizedMenus.some((li) => {
+      const menuPath = li.path || li.name || '';
       if (li.children && li.children.length > 0) {
+        if (menuPath === activeKey) {
+          nextOpenKey = menuPath;
+          return true;
+        }
         const matchedChild = li.children.find((el) => {
           // exact match or path prefix match
           return (
@@ -205,7 +222,7 @@ const AccordionNav: FC<AccordionProps> = ({
           );
         });
         if (matchedChild) {
-          nextOpenKey = li.path || li.name || '';
+          nextOpenKey = menuPath;
           return true;
         }
       }
@@ -230,18 +247,14 @@ const AccordionNav: FC<AccordionProps> = ({
       );
     }
   };
-  useLayoutEffect(() => {
-    if (syncedActiveKeyRef.current !== activeKey) {
+  useEffect(() => {
+    if (syncedActiveKeyRef.current !== activeKey || matchedOpenKey) {
       syncedActiveKeyRef.current = activeKey;
       setOpenKey(matchedOpenKey);
     }
   }, [activeKey, matchedOpenKey]);
   return (
-    <Accordion
-      activeKey={openKey}
-      flush
-      id={accordionId}
-      className="answer-accordion-nav">
+    <nav id={accordionId} className="answer-accordion-nav">
       <Nav variant="pills" className="flex-column" activeKey={activeKey}>
         {normalizedMenus.map((li) => {
           return (
@@ -256,7 +269,7 @@ const AccordionNav: FC<AccordionProps> = ({
           );
         })}
       </Nav>
-    </Accordion>
+    </nav>
   );
 };
 

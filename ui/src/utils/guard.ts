@@ -33,7 +33,7 @@ import {
   siteSecurityStore,
   aiControlStore,
 } from '@/stores';
-import { RouteAlias } from '@/router/alias';
+import { REACT_BASE_PATH, RouteAlias } from '@/router/alias';
 import {
   LOGGED_TOKEN_STORAGE_KEY,
   REDIRECT_PATH_STORAGE_KEY,
@@ -109,6 +109,8 @@ export const IGNORE_PATH_LIST = [
   RouteAlias.confirmNewEmail,
   RouteAlias.confirmEmail,
   RouteAlias.authLanding,
+  '/tos',
+  '/privacy',
   '/user-center/',
 ];
 
@@ -123,6 +125,11 @@ export const isIgnoredPath = (ignoredPath?: string | string[]) => {
     return floppyNavigation.matchToCurrentHref(p);
   });
   return !!matchingPath;
+};
+
+const isCurrentHomePath = () => {
+  const rootPath = `${REACT_BASE_PATH || ''}${RouteAlias.home}`;
+  return window.location.pathname === rootPath.replace(/\/{2,}/g, '/');
 };
 
 let pluTimestamp = 0;
@@ -270,6 +277,9 @@ export const shouldLoginRequired = () => {
   }
   const us = deriveLoginState();
   if (us.isLogged) {
+    return gr;
+  }
+  if (isCurrentHomePath()) {
     return gr;
   }
   if (isIgnoredPath(IGNORE_PATH_LIST)) {

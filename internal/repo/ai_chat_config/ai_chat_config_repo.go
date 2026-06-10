@@ -77,6 +77,9 @@ type AIChatConfigRepo interface {
 	CompleteChatUsage(ctx context.Context, chatCompletionID string) error
 	ReleaseChatUsage(ctx context.Context, chatCompletionID string) error
 	SumUserChatUsage(ctx context.Context, userID string, startAt, endAt any) (float64, error)
+	EnsureChatSetting(ctx context.Context) error
+	GetChatSetting(ctx context.Context) (*entity.AIChatSetting, bool, error)
+	SaveChatSetting(ctx context.Context, setting *entity.AIChatSetting) error
 
 	EnsureImageTables(ctx context.Context) error
 	EnsureVideoTables(ctx context.Context) error
@@ -535,6 +538,38 @@ func (r *aiChatConfigRepo) ensureChatUsageLogColumns(ctx context.Context) error 
 			"status": "TEXT NOT NULL DEFAULT 'completed'",
 		})
 	}
+}
+
+func (r *aiChatConfigRepo) EnsureChatSetting(ctx context.Context) error {
+	if err := r.data.DB.Context(ctx).Sync(new(entity.AIChatSetting)); err != nil {
+		return err
+	}
+	exist, err := r.data.DB.Context(ctx).ID(1).Exist(new(entity.AIChatSetting))
+	if err != nil || exist {
+		return err
+	}
+	_, err = r.data.DB.Context(ctx).Insert(&entity.AIChatSetting{ID: 1})
+	return err
+}
+
+func (r *aiChatConfigRepo) GetChatSetting(ctx context.Context) (*entity.AIChatSetting, bool, error) {
+	setting := &entity.AIChatSetting{}
+	exist, err := r.data.DB.Context(ctx).ID(1).Get(setting)
+	return setting, exist, err
+}
+
+func (r *aiChatConfigRepo) SaveChatSetting(ctx context.Context, setting *entity.AIChatSetting) error {
+	setting.ID = 1
+	exist, err := r.data.DB.Context(ctx).ID(1).Exist(new(entity.AIChatSetting))
+	if err != nil {
+		return err
+	}
+	if exist {
+		_, err = r.data.DB.Context(ctx).ID(1).Cols("title_model_id").Update(setting)
+		return err
+	}
+	_, err = r.data.DB.Context(ctx).Insert(setting)
+	return err
 }
 
 func (r *aiChatConfigRepo) EnsureImageTables(ctx context.Context) error {

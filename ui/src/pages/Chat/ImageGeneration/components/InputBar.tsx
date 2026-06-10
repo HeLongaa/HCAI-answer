@@ -23,6 +23,8 @@ import {
   getCachedImage,
   ensureImageCached,
   getActiveAgentRounds,
+  getReferenceImageSizeForInputImages,
+  hasAnyImageAgentThinkingModel,
 } from '../store';
 import type { AiImageModel } from '@/common/interface';
 import { DEFAULT_PARAMS, type TaskParams, type TaskRecord } from '../types';
@@ -46,7 +48,7 @@ import {
   isCursorInSelectedImageMention,
   stripImageMentionMarkers,
 } from '../lib/promptImageMentions';
-import { normalizeImageSize } from '../lib/size';
+import { getClosestImageSizeOption, normalizeImageSize } from '../lib/size';
 import { createMaskPreviewDataUrl } from '../lib/canvasImage';
 import { dismissAllTooltips } from '../lib/tooltipDismiss';
 import { getSafeBoundingClientRect } from '../lib/domRect';
@@ -76,6 +78,7 @@ function getFixedImageModelSize(model: AiImageModel | null, size: string) {
   const normalizedSize = normalizeImageSize(size);
   return (
     options.find((option) => option.value === normalizedSize)?.value ||
+    getClosestImageSizeOption(normalizedSize, options)?.value ||
     defaultSize ||
     options[0]?.value ||
     DEFAULT_PARAMS.size
@@ -1105,26 +1108,33 @@ export default function InputBar() {
   const hasFixedSizeOptions =
     appMode === 'gallery' &&
     Boolean(selectedSystemImageModel?.size_options?.length);
-  const hasSubmitApiConfig = hasGalleryModel;
+  const hasAgentThinkingModel =
+    hasAnyImageAgentThinkingModel(systemImageModels);
+  const hasSubmitApiConfig =
+    appMode === 'agent' ? hasAgentThinkingModel : hasGalleryModel;
   const canSubmit = Boolean(
     prompt.trim() && hasSubmitApiConfig && !activeAgentIsRunning,
   );
+  const missingModelMessage =
+    appMode === 'agent'
+      ? '暂无可用 Agent 思考模型，请联系管理员配置'
+      : '暂无可用图片模型，请联系管理员检查配置';
   const submitButtonAriaLabel = activeAgentIsRunning
     ? '停止生成'
     : hasSubmitApiConfig
       ? maskDraft
         ? '遮罩编辑'
         : '生成图像'
-      : '暂无可用图片模型';
+      : missingModelMessage;
   const submitTooltipText = activeAgentIsRunning
     ? '停止生成'
     : appMode === 'gallery'
       ? systemImageModelsLoading
         ? '图片模型正在加载'
-        : systemImageModelsError || '暂无可用图片模型，请联系管理员检查配置'
+        : systemImageModelsError || missingModelMessage
       : systemImageModelsLoading
         ? '图片模型正在加载'
-        : systemImageModelsError || '暂无可用图片模型，请联系管理员检查配置';
+        : systemImageModelsError || missingModelMessage;
   const promptPlaceholder = '描述你想生成的图片，可输入 @ 来指定参考图...';
   const submitCurrentMode = useCallback(() => {
     if (appMode === 'agent') {
@@ -1205,6 +1215,7 @@ export default function InputBar() {
             { label: 'high', value: 'high' },
           ]);
   const atImageLimit = inputImages.length >= API_MAX_IMAGES;
+  const referenceSizeLocked = inputImages.length > 0;
   const uploadImageTooltipText = atImageLimit
     ? `参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`
     : '上传图片';
@@ -1212,7 +1223,9 @@ export default function InputBar() {
     enabled: () => compressionDisabled,
   });
   const moderationHint = useHintTooltip({ enabled: () => moderationDisabled });
-  const sizeHint = useHintTooltip({ enabled: () => isFalTextToImage });
+  const sizeHint = useHintTooltip({
+    enabled: () => isFalTextToImage || referenceSizeLocked,
+  });
   const qualityHint = useHintTooltip({
     enabled: () => settings.codexCli || isFalProvider || isFlow2APIModel,
   });
@@ -1388,24 +1401,46 @@ export default function InputBar() {
   }, [agentAutoImageCount, params.n]);
 
   useEffect(() => {
-    const normalizedParams = normalizeParamsForFixedSizeModel(
-      normalizeParamsForSettings(params, effectiveSettings, {
-        hasInputImages: inputImages.length > 0,
-      }),
-      appMode === 'gallery' ? selectedSystemImageModel : null,
-    );
-    const patch = getChangedParams(params, normalizedParams);
-    if (Object.keys(patch).length) {
-      setParams(patch);
-    }
+    let cancelled = false;
+
+    void (async () => {
+      const referenceSize = inputImages.length
+        ? await getReferenceImageSizeForInputImages(inputImages)
+        : '';
+      if (cancelled) return;
+
+      const paramsWithReferenceSize = referenceSize
+        ? { ...params, size: referenceSize }
+        : params;
+      const normalizedParams = normalizeParamsForFixedSizeModel(
+        normalizeParamsForSettings(paramsWithReferenceSize, effectiveSettings, {
+          hasInputImages: inputImages.length > 0,
+        }),
+        appMode === 'gallery' ? selectedSystemImageModel : null,
+      );
+      const patch = getChangedParams(params, normalizedParams);
+      if (Object.keys(patch).length) {
+        setParams(patch);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     appMode,
-    inputImages.length,
+    inputImages,
     params,
     effectiveSettings,
     selectedSystemImageModel,
     setParams,
   ]);
+
+  useEffect(() => {
+    if (referenceSizeLocked && showSizePicker) {
+      setShowSizePicker(false);
+    }
+  }, [referenceSizeLocked, showSizePicker]);
 
   useEffect(
     () => () => {
@@ -2598,24 +2633,34 @@ export default function InputBar() {
         <span className="text-gray-400 dark:text-gray-500 ml-1">尺寸</span>
         <button
           type="button"
+          disabled={referenceSizeLocked}
           onClick={() => {
+            if (referenceSizeLocked) return;
             dismissAllTooltips();
             setShowSizePicker(true);
           }}
-          className={`${paramControlClass} focus:outline-none text-left`}
-          title="选择尺寸">
+          className={`${
+            referenceSizeLocked ? paramControlDisabledClass : paramControlClass
+          } focus:outline-none text-left`}
+          title={referenceSizeLocked ? '尺寸由参考图决定' : '选择尺寸'}>
           {displaySize}
         </button>
         <ButtonTooltip
-          visible={isFalTextToImage && sizeHint.visible}
+          visible={
+            (isFalTextToImage || referenceSizeLocked) && sizeHint.visible
+          }
           text={
-            <>
-              fal.ai 的文生图模式不支持{' '}
-              <code className="rounded bg-white/10 px-1 py-0.5 font-mono">
-                auto
-              </code>{' '}
-              参数
-            </>
+            referenceSizeLocked ? (
+              <>有参考图时尺寸由首张参考图自动决定</>
+            ) : (
+              <>
+                fal.ai 的文生图模式不支持{' '}
+                <code className="rounded bg-white/10 px-1 py-0.5 font-mono">
+                  auto
+                </code>{' '}
+                参数
+              </>
+            )
           }
         />
       </label>
@@ -2866,7 +2911,7 @@ export default function InputBar() {
         </div>
       )}
 
-      {showSizePicker && (
+      {showSizePicker && !referenceSizeLocked && (
         <SizePickerModal
           currentSize={
             hasFixedSizeOptions

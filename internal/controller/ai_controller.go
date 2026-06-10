@@ -1363,12 +1363,141 @@ func (c *AIController) saveConversationRecord(ctx context.Context, chatcmplID st
 			log.Errorf("Failed to create conversation: %v", err)
 			return
 		}
+		setFirstUserMessageContent(conversationCtx.Messages, topic)
 	}
 
 	err := c.aiConversationService.SaveConversationRecords(ctx, conversationCtx.ConversationID, chatcmplID, conversationCtx.BranchParentMessageID, conversationCtx.Messages)
 	if err != nil {
 		log.Errorf("Failed to save conversation records: %v", err)
+		return
 	}
+	if conversationCtx.IsNewConversation {
+		userID := conversationCtx.UserID
+		conversationID := conversationCtx.ConversationID
+		userQuestion := conversationCtx.UserQuestion
+		assistantReply := firstAssistantReply(conversationCtx.Messages)
+		go c.generateAndSaveConversationTitle(userID, conversationID, userQuestion, assistantReply)
+	}
+}
+
+func setFirstUserMessageContent(messages []*ai_conversation.ConversationMessage, content string) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	for _, message := range messages {
+		if message.Role == openai.ChatMessageRoleUser {
+			message.Content = content
+			return
+		}
+	}
+}
+
+func firstAssistantReply(messages []*ai_conversation.ConversationMessage) string {
+	for _, message := range messages {
+		if message.Role != openai.ChatMessageRoleAssistant {
+			continue
+		}
+		if content := strings.TrimSpace(message.Content); content != "" {
+			return content
+		}
+	}
+	return ""
+}
+
+func (c *AIController) generateAndSaveConversationTitle(userID, conversationID, userQuestion, assistantReply string) {
+	if c.aiChatConfigService == nil || c.aiConversationService == nil {
+		return
+	}
+	userQuestion = strings.TrimSpace(userQuestion)
+	assistantReply = strings.TrimSpace(assistantReply)
+	if userID == "" || conversationID == "" || userQuestion == "" || assistantReply == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	setting, err := c.aiChatConfigService.GetChatSetting(ctx)
+	if err != nil {
+		log.Errorf("Failed to get AI chat setting for title generation: %v", err)
+		return
+	}
+	if setting == nil || strings.TrimSpace(setting.TitleModelID) == "" {
+		return
+	}
+	upstream, err := c.aiChatConfigService.ResolveUpstreamModel(ctx, setting.TitleModelID)
+	if err != nil {
+		log.Errorf("Failed to resolve title model %s: %v", setting.TitleModelID, err)
+		return
+	}
+	title, err := c.createConversationTitle(ctx, upstream, userQuestion, assistantReply)
+	if err != nil {
+		log.Errorf("Failed to generate conversation title: %v", err)
+		return
+	}
+	title = sanitizeConversationTitle(title)
+	if title == "" {
+		return
+	}
+	if err = c.aiConversationService.UpdateConversationTopic(ctx, userID, conversationID, title); err != nil {
+		log.Errorf("Failed to update conversation title: %v", err)
+	}
+}
+
+func (c *AIController) createConversationTitle(ctx context.Context, upstream *schema.AIUpstreamModelResp, userQuestion, assistantReply string) (string, error) {
+	if upstream == nil || upstream.ProviderModelID == "" {
+		return "", fmt.Errorf("title model is not configured")
+	}
+	client := c.createOpenAIClient(upstream.BaseURL, upstream.APIKey)
+	response, err := client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: upstream.ProviderModelID,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: "你是对话标题生成器。请根据用户第一条消息和助手第一条回复生成一个简短标题。要求：中文不超过12个字，英文不超过6个词；不要引号、标点、解释、Markdown。",
+			},
+			{
+				Role: openai.ChatMessageRoleUser,
+				Content: fmt.Sprintf(
+					"用户消息：\n%s\n\n助手回复：\n%s",
+					truncateForConversationTitlePrompt(userQuestion, 1600),
+					truncateForConversationTitlePrompt(assistantReply, 2400),
+				),
+			},
+		},
+		Stream: false,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(response.Choices) == 0 {
+		return "", fmt.Errorf("title model returned no choices")
+	}
+	return response.Choices[0].Message.Content, nil
+}
+
+func truncateForConversationTitlePrompt(text string, maxRunes int) string {
+	text = strings.TrimSpace(text)
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	return string(runes[:maxRunes])
+}
+
+func sanitizeConversationTitle(title string) string {
+	title = strings.TrimSpace(title)
+	title = strings.Trim(title, "`'\"“”‘’ \t\r\n")
+	title = strings.ReplaceAll(title, "\r", " ")
+	title = strings.ReplaceAll(title, "\n", " ")
+	title = strings.Join(strings.Fields(title), " ")
+	title = strings.Trim(title, "。！？!?，,；;：:")
+	runes := []rune(title)
+	if len(runes) > 40 {
+		title = string(runes[:40])
+	}
+	return strings.TrimSpace(title)
 }
 
 func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWriter, id string, client *openai.Client, conversationCtx *ConversationContext) bool {

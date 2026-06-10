@@ -101,6 +101,20 @@ func (ctrl *AIChatConfigController) ListModelMappings(ctx *gin.Context) {
 	handler.HandleResponse(ctx, err, resp)
 }
 
+func (ctrl *AIChatConfigController) GetChatSetting(ctx *gin.Context) {
+	resp, err := ctrl.aiChatConfigService.GetChatSetting(ctx)
+	handler.HandleResponse(ctx, err, resp)
+}
+
+func (ctrl *AIChatConfigController) SaveChatSetting(ctx *gin.Context) {
+	req := &schema.AIChatSettingReq{}
+	if handler.BindAndCheck(ctx, req) {
+		return
+	}
+	resp, err := ctrl.aiChatConfigService.SaveChatSetting(ctx, req)
+	handler.HandleResponse(ctx, err, resp)
+}
+
 func (ctrl *AIChatConfigController) CreateModelMapping(ctx *gin.Context) {
 	req := &schema.AIModelMappingReq{}
 	if handler.BindAndCheck(ctx, req) {
