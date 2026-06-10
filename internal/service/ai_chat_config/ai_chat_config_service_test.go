@@ -7,12 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/apache/answer/internal/entity"
+	"github.com/apache/answer/internal/service/service_config"
 )
 
 func TestMonthRange(t *testing.T) {
@@ -157,6 +159,41 @@ func TestDownloadImageRejectsNonImageResponse(t *testing.T) {
 	_, _, err := downloadImage(context.Background(), server.URL, imageDownloadOptions{})
 	if err == nil || !strings.Contains(err.Error(), "not an image") {
 		t.Fatalf("err = %v, want non-image error", err)
+	}
+}
+
+func TestSaveGeminiImageResponse(t *testing.T) {
+	dir := t.TempDir()
+	service := &aiChatConfigService{
+		serviceConfig: &service_config.ServiceConfig{UploadPath: dir},
+	}
+	body := []byte(`{
+		"candidates": [
+			{
+				"content": {
+					"role": "model",
+					"parts": [
+						{
+							"inlineData": {
+								"mimeType": "image/png",
+								"data": "` + base64.StdEncoding.EncodeToString([]byte("png-data")) + `"
+							}
+						}
+					]
+				}
+			}
+		]
+	}`)
+
+	urls, err := service.saveGeminiImageResponse(context.Background(), "1", "img_test", body)
+	if err != nil {
+		t.Fatalf("saveGeminiImageResponse err = %v", err)
+	}
+	if len(urls) != 1 || urls[0] != "/uploads/ai-images/1/img_test-1.png" {
+		t.Fatalf("urls = %#v, want saved image URL", urls)
+	}
+	if _, err := os.Stat(dir + "/ai-images/1/img_test-1.png"); err != nil {
+		t.Fatalf("saved file missing: %v", err)
 	}
 }
 

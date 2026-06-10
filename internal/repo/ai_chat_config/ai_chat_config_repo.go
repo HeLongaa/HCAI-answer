@@ -505,9 +505,22 @@ func (r *aiChatConfigRepo) SumUserChatUsage(ctx context.Context, userID string, 
 }
 
 func (r *aiChatConfigRepo) ensureChatUsageLogSchema(ctx context.Context) error {
+	exists, err := r.tableExists(ctx, "ai_chat_usage_logs")
+	if err != nil {
+		return err
+	}
+	if exists {
+		if err := r.ensureChatUsageLogColumns(ctx); err != nil {
+			return err
+		}
+	}
 	if err := r.data.DB.Context(ctx).Sync(new(entity.AIChatUsageLog)); err != nil {
 		return err
 	}
+	return r.ensureChatUsageLogColumns(ctx)
+}
+
+func (r *aiChatConfigRepo) ensureChatUsageLogColumns(ctx context.Context) error {
 	switch r.data.DB.Dialect().URI().DBType {
 	case schemas.MYSQL:
 		return r.ensureColumns(ctx, "ai_chat_usage_logs", map[string]string{
@@ -525,7 +538,7 @@ func (r *aiChatConfigRepo) ensureChatUsageLogSchema(ctx context.Context) error {
 }
 
 func (r *aiChatConfigRepo) EnsureImageTables(ctx context.Context) error {
-	if err := r.ensureImageSchemaColumns(ctx); err != nil {
+	if err := r.ensureExistingImageSchemaColumns(ctx); err != nil {
 		return err
 	}
 	if err := r.data.DB.Context(ctx).Sync(
@@ -535,6 +548,9 @@ func (r *aiChatConfigRepo) EnsureImageTables(ctx context.Context) error {
 		new(entity.AIImageGeneration),
 		new(entity.AIImageAgentConversation),
 	); err != nil {
+		return err
+	}
+	if err := r.ensureImageSchemaColumns(ctx); err != nil {
 		return err
 	}
 	exist, err := r.data.DB.Context(ctx).ID(1).Exist(new(entity.AIImageSetting))
@@ -548,11 +564,57 @@ func (r *aiChatConfigRepo) EnsureImageTables(ctx context.Context) error {
 	return err
 }
 
+func (r *aiChatConfigRepo) ensureExistingImageSchemaColumns(ctx context.Context) error {
+	checks := []struct {
+		table string
+		fn    func(context.Context) error
+	}{
+		{table: "ai_image_providers", fn: r.ensureImageProviderColumns},
+		{table: "ai_image_models", fn: r.ensureImageModelColumns},
+		{table: "ai_image_generations", fn: r.ensureImageGenerationColumns},
+	}
+	for _, check := range checks {
+		exists, err := r.tableExists(ctx, check.table)
+		if err != nil {
+			return err
+		}
+		if exists {
+			if err := check.fn(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (r *aiChatConfigRepo) ensureImageSchemaColumns(ctx context.Context) error {
+	if err := r.ensureImageProviderColumns(ctx); err != nil {
+		return err
+	}
 	if err := r.ensureImageModelColumns(ctx); err != nil {
 		return err
 	}
 	return r.ensureImageGenerationColumns(ctx)
+}
+
+func (r *aiChatConfigRepo) ensureImageProviderColumns(ctx context.Context) error {
+	switch r.data.DB.Dialect().URI().DBType {
+	case schemas.MYSQL:
+		return r.ensureColumns(ctx, "ai_image_providers", map[string]string{
+			"api_format":            "VARCHAR(50) NOT NULL DEFAULT 'openai'",
+			"flow2api_model_groups": "TEXT NULL",
+		})
+	case schemas.POSTGRES:
+		return r.ensureColumns(ctx, "ai_image_providers", map[string]string{
+			"api_format":            "VARCHAR(50) NOT NULL DEFAULT 'openai'",
+			"flow2api_model_groups": "TEXT NOT NULL DEFAULT ''",
+		})
+	default:
+		return r.ensureColumns(ctx, "ai_image_providers", map[string]string{
+			"api_format":            "TEXT NOT NULL DEFAULT 'openai'",
+			"flow2api_model_groups": "TEXT NOT NULL DEFAULT ''",
+		})
+	}
 }
 
 func (r *aiChatConfigRepo) ensureImageModelColumns(ctx context.Context) error {
@@ -648,6 +710,29 @@ func (r *aiChatConfigRepo) ensureColumns(ctx context.Context, table string, colu
 		}
 	}
 	return nil
+}
+
+func (r *aiChatConfigRepo) tableExists(ctx context.Context, table string) (bool, error) {
+	switch r.data.DB.Dialect().URI().DBType {
+	case schemas.MYSQL:
+		rows, err := r.data.DB.Context(ctx).QueryString(
+			"SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+			table,
+		)
+		return len(rows) > 0, err
+	case schemas.POSTGRES:
+		rows, err := r.data.DB.Context(ctx).QueryString(
+			"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1",
+			table,
+		)
+		return len(rows) > 0, err
+	default:
+		rows, err := r.data.DB.Context(ctx).QueryString(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+			table,
+		)
+		return len(rows) > 0, err
+	}
 }
 
 func (r *aiChatConfigRepo) columnExists(ctx context.Context, table, column string) (bool, error) {

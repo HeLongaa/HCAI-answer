@@ -151,14 +151,16 @@ type AIChatUsageLog struct {
 func (AIChatUsageLog) TableName() string { return "ai_chat_usage_logs" }
 
 type AIImageProvider struct {
-	ID        int       `xorm:"not null pk autoincr INT(11) id"`
-	Name      string    `xorm:"not null default '' VARCHAR(255) name"`
-	BaseURL   string    `xorm:"not null default '' VARCHAR(500) base_url"`
-	APIKey    string    `xorm:"not null TEXT api_key"`
-	Enabled   bool      `xorm:"not null default true BOOL enabled"`
-	Remark    string    `xorm:"not null TEXT remark"`
-	CreatedAt time.Time `xorm:"created not null default CURRENT_TIMESTAMP TIMESTAMP created_at"`
-	UpdatedAt time.Time `xorm:"updated not null default CURRENT_TIMESTAMP TIMESTAMP updated_at"`
+	ID                  int       `xorm:"not null pk autoincr INT(11) id"`
+	Name                string    `xorm:"not null default '' VARCHAR(255) name"`
+	BaseURL             string    `xorm:"not null default '' VARCHAR(500) base_url"`
+	APIKey              string    `xorm:"not null TEXT api_key"`
+	APIFormat           string    `xorm:"not null default 'openai' VARCHAR(50) api_format"`
+	Flow2APIModelGroups string    `xorm:"not null default '' TEXT flow2api_model_groups"`
+	Enabled             bool      `xorm:"not null default true BOOL enabled"`
+	Remark              string    `xorm:"not null TEXT remark"`
+	CreatedAt           time.Time `xorm:"created not null default CURRENT_TIMESTAMP TIMESTAMP created_at"`
+	UpdatedAt           time.Time `xorm:"updated not null default CURRENT_TIMESTAMP TIMESTAMP updated_at"`
 }
 
 func (AIImageProvider) TableName() string { return "ai_image_providers" }

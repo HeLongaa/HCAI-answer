@@ -10,6 +10,9 @@ import (
 )
 
 func ensureAIImageModelConfigColumns(ctx context.Context, x *xorm.Engine) error {
+	if err := ensureAIImageProviderColumns(ctx, x); err != nil {
+		return err
+	}
 	if err := ensureAIImageModelColumns(ctx, x); err != nil {
 		return err
 	}
@@ -24,6 +27,26 @@ func ensureAIImageModelConfigColumns(ctx context.Context, x *xorm.Engine) error 
 		return fmt.Errorf("ensure ai image model config columns failed: %w", err)
 	}
 	return nil
+}
+
+func ensureAIImageProviderColumns(ctx context.Context, x *xorm.Engine) error {
+	switch x.Dialect().URI().DBType {
+	case schemas.MYSQL:
+		return ensureColumns(ctx, x, "ai_image_providers", map[string]string{
+			"api_format":            "VARCHAR(50) NOT NULL DEFAULT 'openai'",
+			"flow2api_model_groups": "TEXT NULL",
+		})
+	case schemas.POSTGRES:
+		return ensureColumns(ctx, x, "ai_image_providers", map[string]string{
+			"api_format":            "VARCHAR(50) NOT NULL DEFAULT 'openai'",
+			"flow2api_model_groups": "TEXT NOT NULL DEFAULT ''",
+		})
+	default:
+		return ensureColumns(ctx, x, "ai_image_providers", map[string]string{
+			"api_format":            "TEXT NOT NULL DEFAULT 'openai'",
+			"flow2api_model_groups": "TEXT NOT NULL DEFAULT ''",
+		})
+	}
 }
 
 func ensureAIImageModelColumns(ctx context.Context, x *xorm.Engine) error {

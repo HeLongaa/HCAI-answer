@@ -146,14 +146,22 @@ const imageProviderInit = {
   name: '',
   base_url: 'https://api.openai.com/v1',
   api_key: '',
+  api_format: 'openai' as Type.AdminAiImageProviderParams['api_format'],
+  flow2api_model_groups: [] as string[],
   enabled: true,
   remark: '',
 };
+
+const flow2APIImageModelGroups = [
+  'gemini-3.1-flash-image',
+  'gemini-3.0-pro-image',
+];
 
 const imageModelUpstreamInit = {
   client_id: '',
   provider_id: 0,
   provider_model_id: '',
+  quality_model_id: '',
   agent_model_id: '',
   responses_model_id: '',
   weight: 1,
@@ -167,6 +175,7 @@ const imageModelInit = {
   provider_id: 0,
   site_model_id: '',
   provider_model_id: '',
+  quality_model_id: '',
   agent_model_id: '',
   display_name: '',
   description: '',
@@ -195,6 +204,7 @@ const newImageModelUpstream = (): ImageModelUpstreamForm => ({
 
 const normalizeImageModelUpstreams = (
   upstreams?: Array<Type.AiImageModelUpstream | ImageModelUpstreamForm>,
+  isGrokProvider?: (providerID: number) => boolean,
 ) =>
   (upstreams || [])
     .map((upstream, index) => ({
@@ -202,6 +212,10 @@ const normalizeImageModelUpstreams = (
         'client_id' in upstream ? upstream.client_id : `saved-${index}`,
       provider_id: Number(upstream.provider_id || 0),
       provider_model_id: upstream.provider_model_id || '',
+      quality_model_id:
+        !isGrokProvider || isGrokProvider(Number(upstream.provider_id || 0))
+          ? upstream.quality_model_id || ''
+          : '',
       agent_model_id: upstream.agent_model_id || '',
       responses_model_id: upstream.responses_model_id || '',
       weight: Math.max(1, Number(upstream.weight || 1)),
@@ -333,6 +347,14 @@ const AiChatConfig = () => {
         })),
       ),
     [providers],
+  );
+  const getImageProviderAPIFormat = (providerID: number) =>
+    imageProviders.find((provider) => provider.id === providerID)?.api_format ||
+    'openai';
+  const isGrokImageProviderID = (providerID: number) =>
+    getImageProviderAPIFormat(providerID) === 'grok';
+  const isImageModelGrokProvider = isGrokImageProviderID(
+    Number(imageModelForm.provider_id || 0),
   );
 
   const loadAll = async (showFullLoading = false) => {
@@ -601,11 +623,18 @@ const AiChatConfig = () => {
     evt.preventDefault();
     setError('');
     try {
+      const normalizedUpstreams = normalizeImageModelUpstreams(
+        imageModelForm.upstreams,
+        isGrokImageProviderID,
+      );
       const payload = {
         ...imageModelForm,
         provider_id: Number(imageModelForm.provider_id),
         sort_order: Number(imageModelForm.sort_order),
-        upstreams: normalizeImageModelUpstreams(imageModelForm.upstreams).map(
+        quality_model_id: isImageModelGrokProvider
+          ? imageModelForm.quality_model_id || ''
+          : '',
+        upstreams: normalizedUpstreams.map(
           ({ client_id, ...upstream }) => upstream,
         ),
       };
@@ -1811,7 +1840,7 @@ const AiChatConfig = () => {
             <Card.Body>
               <Form onSubmit={submitImageProvider}>
                 <Row>
-                  <Col md={3}>
+                  <Col md={2}>
                     <Form.Group className="mb-3">
                       <Form.Label>Provider 名称</Form.Label>
                       <Form.Control
@@ -1862,6 +1891,33 @@ const AiChatConfig = () => {
                   </Col>
                   <Col md={2}>
                     <Form.Group className="mb-3">
+                      <Form.Label>协议格式</Form.Label>
+                      <Form.Select
+                        value={imageProviderForm.api_format || 'openai'}
+                        onChange={(e) => {
+                          const nextFormat = e.target
+                            .value as Type.AdminAiImageProviderParams['api_format'];
+                          setImageProviderForm({
+                            ...imageProviderForm,
+                            api_format: nextFormat,
+                            flow2api_model_groups:
+                              nextFormat === 'flow2api'
+                                ? imageProviderForm.flow2api_model_groups
+                                    ?.length
+                                  ? imageProviderForm.flow2api_model_groups
+                                  : flow2APIImageModelGroups
+                                : [],
+                          });
+                        }}>
+                        <option value="openai">OpenAI 兼容</option>
+                        <option value="gemini">Gemini 原生</option>
+                        <option value="flow2api">Flow2API</option>
+                        <option value="grok">Grok / xAI 图片</option>
+                      </Form.Select>
+                    </Form.Group>
+                  </Col>
+                  <Col md={1}>
+                    <Form.Group className="mb-3">
                       <Form.Label>备注</Form.Label>
                       <Form.Control
                         value={imageProviderForm.remark}
@@ -1875,6 +1931,35 @@ const AiChatConfig = () => {
                     </Form.Group>
                   </Col>
                 </Row>
+                {imageProviderForm.api_format === 'flow2api' && (
+                  <div className="mb-3 rounded border border-light-subtle p-3">
+                    <div className="mb-2 fw-semibold">Flow2API 模型组</div>
+                    <div className="d-flex flex-wrap gap-3">
+                      {flow2APIImageModelGroups.map((group) => (
+                        <Form.Check
+                          key={group}
+                          type="switch"
+                          label={group}
+                          checked={
+                            imageProviderForm.flow2api_model_groups?.includes(
+                              group,
+                            ) ?? false
+                          }
+                          onChange={(e) => {
+                            const current =
+                              imageProviderForm.flow2api_model_groups || [];
+                            setImageProviderForm({
+                              ...imageProviderForm,
+                              flow2api_model_groups: e.target.checked
+                                ? Array.from(new Set([...current, group]))
+                                : current.filter((item) => item !== group),
+                            });
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <Form.Check
                   className="mb-3"
                   type="switch"
@@ -1897,6 +1982,7 @@ const AiChatConfig = () => {
               <tr>
                 <th>Provider</th>
                 <th>Base URL</th>
+                <th>协议</th>
                 <th>状态</th>
                 <th>备注</th>
                 <th>操作</th>
@@ -1909,6 +1995,22 @@ const AiChatConfig = () => {
                   <td className="ai-chat-config-text-cell">
                     {provider.base_url}
                   </td>
+                  <td>
+                    {(provider.api_format || 'openai') === 'flow2api'
+                      ? 'Flow2API'
+                      : (provider.api_format || 'openai') === 'gemini'
+                        ? 'Gemini 原生'
+                        : (provider.api_format || 'openai') === 'grok'
+                          ? 'Grok / xAI 图片'
+                          : 'OpenAI 兼容'}
+                    {(provider.api_format || 'openai') === 'flow2api' ? (
+                      provider.flow2api_model_groups?.length ? (
+                        <div className="small text-muted">
+                          {provider.flow2api_model_groups.join('、')}
+                        </div>
+                      ) : null
+                    ) : null}
+                  </td>
                   <td>{provider.enabled ? '启用' : '禁用'}</td>
                   <td>{provider.remark}</td>
                   <td className="ai-chat-config-action-cell">
@@ -1916,7 +2018,13 @@ const AiChatConfig = () => {
                       size="sm"
                       variant="outline-primary"
                       onClick={() =>
-                        setImageProviderForm({ ...provider, api_key: '' })
+                        setImageProviderForm({
+                          ...provider,
+                          api_format: provider.api_format || 'openai',
+                          flow2api_model_groups:
+                            provider.flow2api_model_groups || [],
+                          api_key: '',
+                        })
                       }>
                       编辑
                     </Button>
@@ -1942,12 +2050,23 @@ const AiChatConfig = () => {
                       <Form.Select
                         required
                         value={imageModelForm.provider_id}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const nextProviderID = Number(e.target.value);
+                          const nextIsGrokProvider =
+                            isGrokImageProviderID(nextProviderID);
                           setImageModelForm({
                             ...imageModelForm,
-                            provider_id: Number(e.target.value),
-                          })
-                        }>
+                            provider_id: nextProviderID,
+                            quality_model_id: nextIsGrokProvider
+                              ? imageModelForm.quality_model_id
+                              : '',
+                            default_quality:
+                              nextIsGrokProvider &&
+                              imageModelForm.default_quality === 'medium'
+                                ? 'auto'
+                                : imageModelForm.default_quality,
+                          });
+                        }}>
                         <option value={0}>请选择</option>
                         {imageProviders.map((provider) => (
                           <option key={provider.id} value={provider.id}>
@@ -2003,6 +2122,25 @@ const AiChatConfig = () => {
                     </Form.Group>
                   </Col>
                 </Row>
+                {isImageModelGrokProvider && (
+                  <Row>
+                    <Col md={3}>
+                      <Form.Group className="mb-3">
+                        <Form.Label>高质量模型 ID</Form.Label>
+                        <Form.Control
+                          placeholder="grok-imagine-image-quality"
+                          value={imageModelForm.quality_model_id}
+                          onChange={(e) =>
+                            setImageModelForm({
+                              ...imageModelForm,
+                              quality_model_id: e.target.value,
+                            })
+                          }
+                        />
+                      </Form.Group>
+                    </Col>
+                  </Row>
+                )}
                 <Row>
                   <Col md={3}>
                     <Form.Group className="mb-3">
@@ -2093,7 +2231,9 @@ const AiChatConfig = () => {
                         }>
                         <option value="auto">auto</option>
                         <option value="low">low</option>
-                        <option value="medium">medium</option>
+                        {!isImageModelGrokProvider && (
+                          <option value="medium">medium</option>
+                        )}
                         <option value="high">high</option>
                       </Form.Select>
                     </Form.Group>
@@ -2211,17 +2351,26 @@ const AiChatConfig = () => {
                           );
                           setImageModelForm({ ...imageModelForm, upstreams });
                         };
+                        const isUpstreamGrokProvider = isGrokImageProviderID(
+                          Number(upstream.provider_id || 0),
+                        );
                         return (
                           <div
                             key={upstream.client_id}
                             className="ai-chat-config-upstream-row">
                             <Form.Select
                               value={upstream.provider_id}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const nextProviderID = Number(e.target.value);
                                 updateUpstream({
-                                  provider_id: Number(e.target.value),
-                                })
-                              }>
+                                  provider_id: nextProviderID,
+                                  quality_model_id: isGrokImageProviderID(
+                                    nextProviderID,
+                                  )
+                                    ? upstream.quality_model_id
+                                    : '',
+                                });
+                              }}>
                               <option value={0}>Provider</option>
                               {imageProviders.map((provider) => (
                                 <option key={provider.id} value={provider.id}>
@@ -2238,6 +2387,17 @@ const AiChatConfig = () => {
                                 })
                               }
                             />
+                            {isUpstreamGrokProvider && (
+                              <Form.Control
+                                placeholder="高质量模型 ID，可选"
+                                value={upstream.quality_model_id}
+                                onChange={(e) =>
+                                  updateUpstream({
+                                    quality_model_id: e.target.value,
+                                  })
+                                }
+                              />
+                            )}
                             <Form.Control
                               placeholder="Agent 模型，可选"
                               value={upstream.agent_model_id}
@@ -2352,6 +2512,7 @@ const AiChatConfig = () => {
                         setImageModelForm({
                           ...imageModelInit,
                           ...model,
+                          quality_model_id: model.quality_model_id || '',
                           agent_model_id: model.agent_model_id || '',
                           upstreams: normalizeImageModelUpstreams(
                             model.upstreams,

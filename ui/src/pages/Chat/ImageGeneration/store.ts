@@ -96,6 +96,7 @@ import {
   getChangedParams,
   normalizeParamsForSettings,
 } from './lib/paramCompatibility';
+import { normalizeImageSize } from './lib/size';
 
 export const ALL_FAVORITES_COLLECTION_ID = '__all_favorites__';
 export const DEFAULT_FAVORITE_COLLECTION_ID = '__default_favorites__';
@@ -127,6 +128,7 @@ const MAX_THUMBNAIL_BACKFILL_CONCURRENT = 4;
 const FAL_RECOVERY_POLL_MS = 10_000;
 const CUSTOM_RECOVERY_POLL_MS = 10_000;
 const LOCAL_RUNNING_TASK_STALE_MS = 10 * 60 * 1000;
+const LOCAL_REMOTE_RUNNING_MERGE_WINDOW_MS = 60 * 1000;
 const SUPPORT_PROMPT_IMAGE_THRESHOLD = 50;
 const AGENT_INPUT_DRAFT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 const AGENT_ROUND_IMAGE_MENTION_RE = /@(?:第)?(\d+)轮图(\d+)/g;
@@ -150,6 +152,60 @@ type AgentInputDraft = {
   maskEditorImageId: string | null;
   updatedAt?: number;
 };
+
+function normalizeParamsForSystemImageModel(
+  params: TaskParams,
+  model?: AiImageModel | null,
+): TaskParams {
+  const options = model?.size_options || [];
+  const qualityOptions = model?.quality_options || [];
+  if (!options.length && !qualityOptions.length) return params;
+  const defaultSize = model?.default_size;
+  const providerAPIFormat = model?.provider_api_format;
+  const quality = qualityOptions.length
+    ? qualityOptions.includes(params.quality)
+      ? params.quality
+      : (qualityOptions.includes(model?.default_quality || '')
+          ? model?.default_quality
+          : qualityOptions[0]) || DEFAULT_PARAMS.quality
+    : params.quality;
+
+  if (!options.length) {
+    return {
+      ...params,
+      quality: quality as TaskParams['quality'],
+    };
+  }
+
+  const allowedSizes = new Set(options.map((option) => option.value));
+  if (!params.size || params.size === 'auto') {
+    const nextParams = {
+      ...params,
+      size: 'auto',
+      quality: quality as TaskParams['quality'],
+    };
+    if (providerAPIFormat === 'flow2api') {
+      nextParams.quality = 'auto';
+    }
+    return nextParams;
+  }
+  const normalizedSize = normalizeImageSize(params.size);
+  const size = allowedSizes.has(normalizedSize)
+    ? normalizedSize
+    : defaultSize && allowedSizes.has(defaultSize)
+      ? defaultSize
+      : options[0]?.value || DEFAULT_PARAMS.size;
+
+  const nextParams = {
+    ...params,
+    size,
+    quality: quality as TaskParams['quality'],
+  };
+  if (providerAPIFormat === 'flow2api') {
+    nextParams.quality = 'auto';
+  }
+  return nextParams;
+}
 
 export function getErrorToastMessage(message: string): string {
   const text = message.trim();
@@ -1736,11 +1792,15 @@ export const useStore = create<AppState>()(
           const selectedModel = st.systemImageModels.find(
             (model) => model.site_model_id === id,
           );
+          const nextParams = normalizeParamsForSystemImageModel(
+            selectedModel?.default_size
+              ? { ...st.params, size: selectedModel.default_size }
+              : st.params,
+            selectedModel,
+          );
           return {
             selectedSystemImageModelId: id,
-            ...(selectedModel?.default_size
-              ? { params: { ...st.params, size: selectedModel.default_size } }
-              : {}),
+            params: nextParams,
           };
         }),
       loadSystemImageModels: async () => {
@@ -1770,15 +1830,16 @@ export const useStore = create<AppState>()(
                 systemImageModelsLoaded: true,
                 systemImageModelsError: null,
                 selectedSystemImageModelId: selectedModel?.site_model_id || '',
-                ...(selectedModel?.default_size &&
-                latestState.params.size === DEFAULT_PARAMS.size
-                  ? {
-                      params: {
+                params: normalizeParamsForSystemImageModel(
+                  selectedModel?.default_size &&
+                    latestState.params.size === DEFAULT_PARAMS.size
+                    ? {
                         ...latestState.params,
                         size: selectedModel.default_size,
-                      },
-                    }
-                  : {}),
+                      }
+                    : latestState.params,
+                  selectedModel,
+                ),
               };
             });
           } catch (err) {
@@ -1832,6 +1893,9 @@ export const useStore = create<AppState>()(
             const mergedHistoryTasks = historyTasks.map((task) => {
               const rawImageUrlKey = getTaskRawImageUrlKey(task);
               const fingerprint = getTaskHistoryFingerprint(task);
+              const matchingLocalRunningTask = state.tasks.find((localTask) =>
+                isLikelySameRunningGalleryTask(localTask, task),
+              );
               const previous =
                 previousById.get(task.id) ||
                 previousByGenerationId.get(getHistoryTaskMergeKey(task)) ||
@@ -1840,7 +1904,8 @@ export const useStore = create<AppState>()(
                   : undefined) ||
                 (fingerprint
                   ? previousByFingerprint.get(fingerprint)
-                  : undefined);
+                  : undefined) ||
+                matchingLocalRunningTask;
               return previous
                 ? {
                     ...task,
@@ -1861,12 +1926,16 @@ export const useStore = create<AppState>()(
             });
             const shouldKeepAllLocalGalleryTasks = historyTasks.length === 0;
             const localTasks = state.tasks.filter((task) => {
-              const isGalleryTask = (task.sourceMode ?? 'gallery') === 'gallery';
+              const isGalleryTask =
+                (task.sourceMode ?? 'gallery') === 'gallery';
               return (
                 (shouldKeepLocalTask(task) ||
                   (shouldKeepAllLocalGalleryTasks && isGalleryTask)) &&
                 !historyTaskIds.has(getHistoryTaskMergeKey(task)) &&
                 !historyTaskRawImageUrlKeys.has(getTaskRawImageUrlKey(task)) &&
+                !historyTasks.some((historyTask) =>
+                  isLikelySameRunningGalleryTask(task, historyTask),
+                ) &&
                 !historyTasks.some(
                   (historyTask) =>
                     Boolean(getTaskHistoryFingerprint(historyTask)) &&
@@ -2537,6 +2606,40 @@ function getTaskHistoryFingerprint(task: TaskRecord): string {
     task.params.moderation || '',
     String(task.params.n || task.outputImages.length || 1),
   ].join('\n');
+}
+
+function getRunningGalleryTaskFingerprint(task: TaskRecord): string {
+  if ((task.sourceMode ?? 'gallery') !== 'gallery') return '';
+  if (task.status !== 'running') return '';
+  if (task.inputImageIds.length > 0 || task.maskImageId) return '';
+  return [
+    'gallery-running',
+    task.prompt.trim(),
+    task.apiModel || '',
+    task.params.size || '',
+    task.params.quality || '',
+    task.params.output_format || '',
+    String(task.params.output_compression ?? ''),
+    task.params.moderation || '',
+    String(task.params.n || 1),
+  ].join('\n');
+}
+
+function isLikelySameRunningGalleryTask(
+  localTask: TaskRecord,
+  historyTask: TaskRecord,
+): boolean {
+  if (localTask.systemGenerationId) return false;
+  if (!historyTask.systemGenerationId) return false;
+  const localFingerprint = getRunningGalleryTaskFingerprint(localTask);
+  if (!localFingerprint) return false;
+  if (localFingerprint !== getRunningGalleryTaskFingerprint(historyTask)) {
+    return false;
+  }
+  return (
+    Math.abs(historyTask.createdAt - localTask.createdAt) <=
+    LOCAL_REMOTE_RUNNING_MERGE_WINDOW_MS
+  );
 }
 
 function getHistoryTaskMergeKey(task: TaskRecord): string {
@@ -3540,9 +3643,12 @@ export async function submitTask(
     await storeImage(img.dataUrl);
   }
 
-  const normalizedParams = normalizeParamsForSettings(params, requestSettings, {
-    hasInputImages: orderedInputImages.length > 0,
-  });
+  const normalizedParams = normalizeParamsForSystemImageModel(
+    normalizeParamsForSettings(params, requestSettings, {
+      hasInputImages: orderedInputImages.length > 0,
+    }),
+    selectedSystemImageModel,
+  );
   const normalizedParamPatch = getChangedParams(params, normalizedParams);
   if (Object.keys(normalizedParamPatch).length) {
     useStore.getState().setParams(normalizedParamPatch);
@@ -4472,6 +4578,10 @@ async function generateSystemAgentImage(opts: {
   try {
     const selectedModel = await getSelectedSystemImageModel();
     if (opts.signal.aborted) throw createAgentAbortError();
+    const normalizedParams = normalizeParamsForSystemImageModel(
+      opts.params,
+      selectedModel,
+    );
 
     const response = await generateAiImage({
       prompt: replaceImageMentionsForApi(
@@ -4479,13 +4589,13 @@ async function generateSystemAgentImage(opts: {
         opts.referenceImageDataUrls.length,
       ),
       model: selectedModel.site_model_id,
-      size: opts.params.size,
-      quality: opts.params.quality,
-      output_format: opts.params.output_format,
+      size: normalizedParams.size,
+      quality: normalizedParams.quality,
+      output_format: normalizedParams.output_format,
       ...(opts.params.output_compression == null
         ? {}
         : { output_compression: opts.params.output_compression }),
-      moderation: opts.params.moderation,
+      moderation: normalizedParams.moderation,
       count: 1,
       reference_images: opts.referenceImageDataUrls,
       ...(opts.maskDataUrl ? { mask_image: opts.maskDataUrl } : {}),
@@ -4505,8 +4615,8 @@ async function generateSystemAgentImage(opts: {
       action: opts.referenceImageDataUrls.length > 0 ? 'auto' : 'generate',
       dataUrl,
       actualParams: {
-        ...opts.params,
-        size: response.size || opts.params.size,
+        ...normalizedParams,
+        size: response.size || normalizedParams.size,
         n: 1,
       },
       revisedPrompt: opts.prompt,
@@ -5295,9 +5405,12 @@ export async function submitAgentMessage() {
     ? getAgentRoundPath(conversation, parentRoundId)
     : [];
   const normalizedParams = {
-    ...normalizeParamsForSettings(params, requestSettings, {
-      hasInputImages: inputImageIds.length > 0,
-    }),
+    ...normalizeParamsForSystemImageModel(
+      normalizeParamsForSettings(params, requestSettings, {
+        hasInputImages: inputImageIds.length > 0,
+      }),
+      selectedSystemImageModel,
+    ),
     n: DEFAULT_PARAMS.n,
   };
   const round: AgentRound = {
@@ -5430,9 +5543,12 @@ export async function regenerateAgentAssistantMessage(
 
   const inputImageIds = uniqueIds(sourceRound.inputImageIds);
   const normalizedParams = {
-    ...normalizeParamsForSettings(params, requestSettings, {
-      hasInputImages: inputImageIds.length > 0,
-    }),
+    ...normalizeParamsForSystemImageModel(
+      normalizeParamsForSettings(params, requestSettings, {
+        hasInputImages: inputImageIds.length > 0,
+      }),
+      selectedSystemImageModel,
+    ),
     n: DEFAULT_PARAMS.n,
   };
   const now = Date.now();
@@ -6059,9 +6175,7 @@ async function executeAgentRound(
         params,
         stream: shouldStreamAgentResponses,
         streamPartialImages:
-          shouldStreamAgentResponses === true
-            ? streamPartialImages
-            : undefined,
+          shouldStreamAgentResponses === true ? streamPartialImages : undefined,
         input: apiInputForTurn,
         maskDataUrl,
         signal: controller.signal,

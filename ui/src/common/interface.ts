@@ -975,6 +975,7 @@ export interface AiImageModel {
   provider_name: string;
   site_model_id: string;
   provider_model_id: string;
+  quality_model_id: string;
   agent_model_id: string;
   display_name: string;
   description: string;
@@ -986,6 +987,9 @@ export interface AiImageModel {
   default_quality: string;
   default_format: string;
   extra_config: string;
+  provider_api_format?: 'openai' | 'gemini' | 'flow2api' | 'grok';
+  size_options?: AiImageModelSizeOption[];
+  quality_options?: string[];
   enabled: boolean;
   sort_order: number;
   created_at: number;
@@ -993,10 +997,18 @@ export interface AiImageModel {
   upstreams?: AiImageModelUpstream[];
 }
 
+export interface AiImageModelSizeOption {
+  label: string;
+  value: string;
+  aspect_ratio: string;
+  tier: string;
+}
+
 export interface AiImageModelUpstream {
   provider_id: number;
   provider_name: string;
   provider_model_id: string;
+  quality_model_id: string;
   agent_model_id: string;
   responses_model_id: string;
   weight: number;
@@ -1006,6 +1018,7 @@ export interface AiImageModelUpstream {
 export interface AdminAiImageModelUpstreamParams {
   provider_id: number;
   provider_model_id: string;
+  quality_model_id: string;
   agent_model_id: string;
   responses_model_id: string;
   weight: number;
@@ -1016,6 +1029,7 @@ export interface AdminAiImageModelParams {
   provider_id: number;
   site_model_id: string;
   provider_model_id: string;
+  quality_model_id: string;
   agent_model_id: string;
   display_name: string;
   description: string;
@@ -1037,6 +1051,8 @@ export interface AdminAiImageProvider {
   name: string;
   base_url: string;
   api_key: string;
+  api_format: 'openai' | 'gemini' | 'flow2api' | 'grok';
+  flow2api_model_groups?: string[];
   enabled: boolean;
   remark: string;
   created_at: number;
@@ -1047,6 +1063,8 @@ export interface AdminAiImageProviderParams {
   name: string;
   base_url: string;
   api_key?: string;
+  api_format: 'openai' | 'gemini' | 'flow2api' | 'grok';
+  flow2api_model_groups?: string[];
   enabled: boolean;
   remark: string;
 }

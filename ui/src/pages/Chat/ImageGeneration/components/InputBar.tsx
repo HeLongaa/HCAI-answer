@@ -24,7 +24,8 @@ import {
   ensureImageCached,
   getActiveAgentRounds,
 } from '../store';
-import { DEFAULT_PARAMS, type TaskRecord } from '../types';
+import type { AiImageModel } from '@/common/interface';
+import { DEFAULT_PARAMS, type TaskParams, type TaskRecord } from '../types';
 import { getActiveApiProfile, normalizeSettings } from '../lib/apiProfiles';
 import {
   DEFAULT_FAL_IMAGE_SIZE,
@@ -65,6 +66,73 @@ import { CloseIcon } from './icons';
 
 function getMentionTagTextLength(el: Element) {
   return el.textContent?.length ?? 0;
+}
+
+function getFixedImageModelSize(model: AiImageModel | null, size: string) {
+  const options = model?.size_options || [];
+  const defaultSize = model?.default_size;
+  if (!options.length) return null;
+  if (!size || size === 'auto') return 'auto';
+  const normalizedSize = normalizeImageSize(size);
+  return (
+    options.find((option) => option.value === normalizedSize)?.value ||
+    defaultSize ||
+    options[0]?.value ||
+    DEFAULT_PARAMS.size
+  );
+}
+
+function isTaskQuality(value: string): value is TaskParams['quality'] {
+  return (
+    value === 'auto' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high'
+  );
+}
+
+function getFixedImageModelQuality(
+  model: AiImageModel,
+  quality: TaskParams['quality'],
+): TaskParams['quality'] {
+  const allowedQualities = (model.quality_options || []).filter(isTaskQuality);
+  if (!allowedQualities.length) return quality;
+  if (allowedQualities.includes(quality)) return quality;
+  if (isTaskQuality(model.default_quality)) {
+    if (allowedQualities.includes(model.default_quality)) {
+      return model.default_quality;
+    }
+  }
+  return allowedQualities[0] || DEFAULT_PARAMS.quality;
+}
+
+function normalizeParamsForFixedSizeModel(
+  params: TaskParams,
+  model: AiImageModel | null,
+): TaskParams {
+  if (!model?.size_options?.length && !model?.quality_options?.length) {
+    return params;
+  }
+  const quality = getFixedImageModelQuality(model, params.quality);
+  if (!model.size_options?.length) {
+    return {
+      ...params,
+      quality,
+    };
+  }
+  const size =
+    getFixedImageModelSize(model, params.size) || DEFAULT_PARAMS.size;
+  const nextParams = {
+    ...params,
+    size,
+    quality,
+  };
+  if (model.provider_api_format === 'flow2api') {
+    nextParams.quality = 'auto';
+  }
+  return {
+    ...nextParams,
+  };
 }
 
 function getNodeVisibleTextLength(node: Node): number {
@@ -469,7 +537,7 @@ function BatchActionButton({
           tooltipState.dismiss();
           void onClick();
         }}
-        className={className}
+        className={`inline-flex h-9 w-9 appearance-none items-center justify-center rounded-lg border border-gray-200/80 bg-white/80 shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 dark:border-white/10 dark:bg-white/[0.08] dark:hover:border-white/20 dark:hover:bg-white/[0.14] ${className}`}
         aria-label={tooltip}>
         {children}
       </button>
@@ -484,6 +552,9 @@ function BatchActionButton({
 
 /** API 支持的最大参考图数量 */
 const API_MAX_IMAGES = 16;
+const batchActionBarClass =
+  'inline-flex items-center gap-2 rounded-xl border border-gray-200/70 bg-white/90 p-1.5 shadow-[0_10px_30px_rgba(15,23,42,0.16)] backdrop-blur-xl dark:border-white/10 dark:bg-gray-900/90 dark:shadow-[0_10px_30px_rgba(0,0,0,0.35)] pointer-events-auto';
+const batchActionDividerClass = 'h-6 w-px bg-gray-200/80 dark:bg-white/10';
 
 function getFavoriteCollectionTasksForBatch(
   collectionId: string,
@@ -1019,6 +1090,21 @@ export default function InputBar() {
     [activeProfile.id, currentActiveProfile.id, settings],
   );
   const hasGalleryModel = systemImageModels.length > 0;
+  const selectedSystemImageModel = useMemo(
+    () =>
+      systemImageModels.find(
+        (model) => model.site_model_id === selectedSystemImageModelId,
+      ) ||
+      systemImageModels[0] ||
+      null,
+    [selectedSystemImageModelId, systemImageModels],
+  );
+  const isFlow2APIModel =
+    appMode === 'gallery' &&
+    selectedSystemImageModel?.provider_api_format === 'flow2api';
+  const hasFixedSizeOptions =
+    appMode === 'gallery' &&
+    Boolean(selectedSystemImageModel?.size_options?.length);
   const hasSubmitApiConfig = hasGalleryModel;
   const canSubmit = Boolean(
     prompt.trim() && hasSubmitApiConfig && !activeAgentIsRunning,
@@ -1089,23 +1175,35 @@ export default function InputBar() {
     : isFalProvider
       ? `fal.ai 最大请求数量为 ${outputImageLimit}`
       : `OpenAI 最大请求数量为 ${outputImageLimit}`;
-  const displaySize =
-    isFalTextToImage && params.size === 'auto'
+  const displaySize = hasFixedSizeOptions
+    ? getFixedImageModelSize(selectedSystemImageModel, params.size)
+    : isFalTextToImage && params.size === 'auto'
       ? DEFAULT_FAL_IMAGE_SIZE
       : normalizeImageSize(params.size) || DEFAULT_PARAMS.size;
 
-  const qualityOptions = isFalProvider
-    ? [
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
-      ]
-    : [
-        { label: 'auto', value: 'auto' },
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
-      ];
+  const systemQualityOptions =
+    appMode === 'gallery' && selectedSystemImageModel?.quality_options?.length
+      ? selectedSystemImageModel.quality_options.map((quality) => ({
+          label: quality,
+          value: quality,
+        }))
+      : null;
+  const qualityOptions =
+    systemQualityOptions ||
+    (isFlow2APIModel
+      ? [{ label: 'auto', value: 'auto' }]
+      : isFalProvider
+        ? [
+            { label: 'low', value: 'low' },
+            { label: 'medium', value: 'medium' },
+            { label: 'high', value: 'high' },
+          ]
+        : [
+            { label: 'auto', value: 'auto' },
+            { label: 'low', value: 'low' },
+            { label: 'medium', value: 'medium' },
+            { label: 'high', value: 'high' },
+          ]);
   const atImageLimit = inputImages.length >= API_MAX_IMAGES;
   const uploadImageTooltipText = atImageLimit
     ? `参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`
@@ -1116,7 +1214,7 @@ export default function InputBar() {
   const moderationHint = useHintTooltip({ enabled: () => moderationDisabled });
   const sizeHint = useHintTooltip({ enabled: () => isFalTextToImage });
   const qualityHint = useHintTooltip({
-    enabled: () => settings.codexCli || isFalProvider,
+    enabled: () => settings.codexCli || isFalProvider || isFlow2APIModel,
   });
   const nLimitHint = useHintTooltip({ autoHideMs: 2000 });
   const maskTargetImage = maskDraft
@@ -1290,16 +1388,24 @@ export default function InputBar() {
   }, [agentAutoImageCount, params.n]);
 
   useEffect(() => {
-    const normalizedParams = normalizeParamsForSettings(
-      params,
-      effectiveSettings,
-      { hasInputImages: inputImages.length > 0 },
+    const normalizedParams = normalizeParamsForFixedSizeModel(
+      normalizeParamsForSettings(params, effectiveSettings, {
+        hasInputImages: inputImages.length > 0,
+      }),
+      appMode === 'gallery' ? selectedSystemImageModel : null,
     );
     const patch = getChangedParams(params, normalizedParams);
     if (Object.keys(patch).length) {
       setParams(patch);
     }
-  }, [inputImages.length, params, effectiveSettings, setParams]);
+  }, [
+    appMode,
+    inputImages.length,
+    params,
+    effectiveSettings,
+    selectedSystemImageModel,
+    setParams,
+  ]);
 
   useEffect(
     () => () => {
@@ -2524,25 +2630,36 @@ export default function InputBar() {
         <span className="text-gray-400 dark:text-gray-500 ml-1">质量</span>
         <Select
           value={
-            settings.codexCli
+            isFlow2APIModel
               ? 'auto'
-              : isFalProvider && params.quality === 'auto'
-                ? 'high'
-                : params.quality
+              : settings.codexCli
+                ? 'auto'
+                : isFalProvider && params.quality === 'auto'
+                  ? 'high'
+                  : params.quality
           }
           onChange={(val) => {
-            if (!settings.codexCli) setParams({ quality: val as any });
+            if (!settings.codexCli && !isFlow2APIModel) {
+              setParams({ quality: val as any });
+            }
           }}
           options={qualityOptions}
-          disabled={settings.codexCli}
+          disabled={settings.codexCli || isFlow2APIModel}
           className={
-            settings.codexCli ? paramControlDisabledClass : paramControlClass
+            settings.codexCli || isFlow2APIModel
+              ? paramControlDisabledClass
+              : paramControlClass
           }
         />
         <ButtonTooltip
-          visible={(settings.codexCli || isFalProvider) && qualityHint.visible}
+          visible={
+            (settings.codexCli || isFalProvider || isFlow2APIModel) &&
+            qualityHint.visible
+          }
           text={
-            isFalProvider ? (
+            isFlow2APIModel ? (
+              'Flow2API 图片模型仅支持 auto 质量'
+            ) : isFalProvider ? (
               <>
                 fal.ai 不支持{' '}
                 <code className="rounded bg-white/10 px-1 py-0.5 font-mono">
@@ -2752,13 +2869,20 @@ export default function InputBar() {
       {showSizePicker && (
         <SizePickerModal
           currentSize={
-            isFalTextToImage && params.size === 'auto'
-              ? DEFAULT_FAL_IMAGE_SIZE
-              : params.size
+            hasFixedSizeOptions
+              ? displaySize || DEFAULT_PARAMS.size
+              : isFalTextToImage && params.size === 'auto'
+                ? DEFAULT_FAL_IMAGE_SIZE
+                : params.size
           }
           onSelect={(size) => setParams({ size })}
           onClose={() => setShowSizePicker(false)}
           allowAuto={!isFalTextToImage}
+          fixedOptions={
+            hasFixedSizeOptions
+              ? selectedSystemImageModel?.size_options || []
+              : []
+          }
         />
       )}
 
@@ -2767,10 +2891,10 @@ export default function InputBar() {
         className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full px-3 sm:px-4 transition-all duration-300">
         {showFavoriteCollectionBatchBar && (
           <div className="flex justify-center mb-3">
-            <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-lg rounded-full flex items-center p-1 border border-gray-200/50 dark:border-white/10 pointer-events-auto">
+            <div className={batchActionBarClass}>
               <BatchActionButton
                 onClick={clearFavoriteCollectionSelection}
-                className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
                 tooltip="取消选择">
                 <svg
                   className="w-5 h-5"
@@ -2785,10 +2909,10 @@ export default function InputBar() {
                   />
                 </svg>
               </BatchActionButton>
-              <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+              <div className={batchActionDividerClass}></div>
               <BatchActionButton
                 onClick={handleSelectAllVisibleFavoriteCollections}
-                className="p-2 text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+                className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
                 tooltip="全选收藏夹">
                 <svg
                   className="w-5 h-5"
@@ -2804,7 +2928,7 @@ export default function InputBar() {
               </BatchActionButton>
               <BatchActionButton
                 onClick={handleInvertVisibleFavoriteCollections}
-                className="p-2 text-purple-500 dark:text-purple-400 hover:text-purple-600 dark:hover:text-purple-300 transition-colors"
+                className="text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
                 tooltip="反选收藏夹">
                 <svg
                   className="w-5 h-5"
@@ -2821,10 +2945,10 @@ export default function InputBar() {
                   <path d="M8 12h8M13 9l3 3-3 3" />
                 </svg>
               </BatchActionButton>
-              <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+              <div className={batchActionDividerClass}></div>
               <BatchActionButton
                 onClick={handleDownloadSelectedFavoriteCollections}
-                className="p-2 text-green-500 dark:text-green-400 hover:text-green-600 dark:hover:text-green-300 transition-colors"
+                className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
                 tooltip="下载选中">
                 <svg
                   className="w-5 h-5"
@@ -2839,10 +2963,10 @@ export default function InputBar() {
                   />
                 </svg>
               </BatchActionButton>
-              <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+              <div className={batchActionDividerClass}></div>
               <BatchActionButton
                 onClick={handleDeleteSelectedFavoriteCollections}
-                className="p-2 text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+                className="text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
                 tooltip="删除选中">
                 <svg
                   className="w-5 h-5"
@@ -2862,10 +2986,10 @@ export default function InputBar() {
         )}
         {showTaskBatchBar && (
           <div className="flex justify-center mb-3">
-            <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-lg rounded-full flex items-center p-1 border border-gray-200/50 dark:border-white/10 pointer-events-auto">
+            <div className={batchActionBarClass}>
               <BatchActionButton
                 onClick={clearSelection}
-                className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
                 tooltip="取消选择">
                 <svg
                   className="w-5 h-5"
@@ -2880,10 +3004,10 @@ export default function InputBar() {
                   />
                 </svg>
               </BatchActionButton>
-              <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+              <div className={batchActionDividerClass}></div>
               <BatchActionButton
                 onClick={handleSelectAllVisibleTasks}
-                className="p-2 text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+                className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
                 tooltip="全选任务">
                 <svg
                   className="w-5 h-5"
@@ -2899,7 +3023,7 @@ export default function InputBar() {
               </BatchActionButton>
               <BatchActionButton
                 onClick={handleInvertVisibleTasks}
-                className="p-2 text-purple-500 dark:text-purple-400 hover:text-purple-600 dark:hover:text-purple-300 transition-colors"
+                className="text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
                 tooltip="反选任务">
                 <svg
                   className="w-5 h-5"
@@ -2916,10 +3040,10 @@ export default function InputBar() {
                   <path d="M8 12h8M13 9l3 3-3 3" />
                 </svg>
               </BatchActionButton>
-              <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+              <div className={batchActionDividerClass}></div>
               <BatchActionButton
                 onClick={handleToggleFavorite}
-                className="p-2 text-yellow-500 dark:text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors"
+                className="text-amber-500 hover:text-amber-600 dark:text-amber-300 dark:hover:text-amber-200"
                 tooltip="编辑收藏夹">
                 {selectedTaskIds.length > 0 &&
                 selectedTaskIds.every(
@@ -2944,10 +3068,10 @@ export default function InputBar() {
                   </svg>
                 )}
               </BatchActionButton>
-              <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+              <div className={batchActionDividerClass}></div>
               <BatchActionButton
                 onClick={handleDownloadSelected}
-                className="p-2 text-green-500 dark:text-green-400 hover:text-green-600 dark:hover:text-green-300 transition-colors"
+                className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
                 tooltip="下载选中">
                 <svg
                   className="w-5 h-5"
@@ -2962,10 +3086,10 @@ export default function InputBar() {
                   />
                 </svg>
               </BatchActionButton>
-              <div className="w-px h-5 bg-gray-200 dark:bg-white/20 mx-1"></div>
+              <div className={batchActionDividerClass}></div>
               <BatchActionButton
                 onClick={handleDeleteSelected}
-                className="p-2 text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+                className="text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
                 tooltip="删除选中">
                 <svg
                   className="w-5 h-5"

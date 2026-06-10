@@ -271,27 +271,32 @@ type AIImageAgentUpstreamResp struct {
 }
 
 type AIImageProviderReq struct {
-	Name    string `json:"name" validate:"required"`
-	BaseURL string `json:"base_url" validate:"required"`
-	APIKey  string `json:"api_key"`
-	Enabled bool   `json:"enabled"`
-	Remark  string `json:"remark"`
+	Name                string   `json:"name" validate:"required"`
+	BaseURL             string   `json:"base_url" validate:"required"`
+	APIKey              string   `json:"api_key"`
+	APIFormat           string   `json:"api_format"`
+	Flow2APIModelGroups []string `json:"flow2api_model_groups"`
+	Enabled             bool     `json:"enabled"`
+	Remark              string   `json:"remark"`
 }
 
 type AIImageProviderResp struct {
-	ID        int    `json:"id"`
-	Name      string `json:"name"`
-	BaseURL   string `json:"base_url"`
-	APIKey    string `json:"api_key"`
-	Enabled   bool   `json:"enabled"`
-	Remark    string `json:"remark"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
+	ID                  int      `json:"id"`
+	Name                string   `json:"name"`
+	BaseURL             string   `json:"base_url"`
+	APIKey              string   `json:"api_key"`
+	APIFormat           string   `json:"api_format"`
+	Flow2APIModelGroups []string `json:"flow2api_model_groups"`
+	Enabled             bool     `json:"enabled"`
+	Remark              string   `json:"remark"`
+	CreatedAt           int64    `json:"created_at"`
+	UpdatedAt           int64    `json:"updated_at"`
 }
 
 type AIImageModelUpstreamReq struct {
 	ProviderID       int    `json:"provider_id"`
 	ProviderModelID  string `json:"provider_model_id"`
+	QualityModelID   string `json:"quality_model_id"`
 	AgentModelID     string `json:"agent_model_id"`
 	ResponsesModelID string `json:"responses_model_id"`
 	Weight           int    `json:"weight"`
@@ -302,6 +307,7 @@ type AIImageModelUpstreamResp struct {
 	ProviderID       int    `json:"provider_id"`
 	ProviderName     string `json:"provider_name"`
 	ProviderModelID  string `json:"provider_model_id"`
+	QualityModelID   string `json:"quality_model_id"`
 	AgentModelID     string `json:"agent_model_id"`
 	ResponsesModelID string `json:"responses_model_id"`
 	Weight           int    `json:"weight"`
@@ -312,6 +318,7 @@ type AIImageModelReq struct {
 	ProviderID      int                       `json:"provider_id"`
 	SiteModelID     string                    `json:"site_model_id" validate:"required"`
 	ProviderModelID string                    `json:"provider_model_id" validate:"required"`
+	QualityModelID  string                    `json:"quality_model_id"`
 	AgentModelID    string                    `json:"agent_model_id"`
 	DisplayName     string                    `json:"display_name"`
 	Description     string                    `json:"description"`
@@ -329,27 +336,38 @@ type AIImageModelReq struct {
 }
 
 type AIImageModelResp struct {
-	ID              int                        `json:"id"`
-	ProviderID      int                        `json:"provider_id"`
-	ProviderName    string                     `json:"provider_name"`
-	SiteModelID     string                     `json:"site_model_id"`
-	ProviderModelID string                     `json:"provider_model_id"`
-	AgentModelID    string                     `json:"agent_model_id"`
-	DisplayName     string                     `json:"display_name"`
-	Description     string                     `json:"description"`
-	DefaultSize     string                     `json:"default_size"`
-	APIMode         string                     `json:"api_mode"`
-	SupportsEdits   bool                       `json:"supports_edits"`
-	SupportsRefs    bool                       `json:"supports_references"`
-	SupportsStream  bool                       `json:"supports_stream"`
-	DefaultQuality  string                     `json:"default_quality"`
-	DefaultFormat   string                     `json:"default_format"`
-	ExtraConfig     string                     `json:"extra_config"`
-	Enabled         bool                       `json:"enabled"`
-	SortOrder       int                        `json:"sort_order"`
-	CreatedAt       int64                      `json:"created_at"`
-	UpdatedAt       int64                      `json:"updated_at"`
-	Upstreams       []AIImageModelUpstreamResp `json:"upstreams"`
+	ID                int                        `json:"id"`
+	ProviderID        int                        `json:"provider_id"`
+	ProviderName      string                     `json:"provider_name"`
+	SiteModelID       string                     `json:"site_model_id"`
+	ProviderModelID   string                     `json:"provider_model_id"`
+	QualityModelID    string                     `json:"quality_model_id"`
+	AgentModelID      string                     `json:"agent_model_id"`
+	DisplayName       string                     `json:"display_name"`
+	Description       string                     `json:"description"`
+	DefaultSize       string                     `json:"default_size"`
+	APIMode           string                     `json:"api_mode"`
+	SupportsEdits     bool                       `json:"supports_edits"`
+	SupportsRefs      bool                       `json:"supports_references"`
+	SupportsStream    bool                       `json:"supports_stream"`
+	DefaultQuality    string                     `json:"default_quality"`
+	DefaultFormat     string                     `json:"default_format"`
+	ExtraConfig       string                     `json:"extra_config"`
+	ProviderAPIFormat string                     `json:"provider_api_format"`
+	SizeOptions       []AIImageModelSizeOption   `json:"size_options"`
+	QualityOptions    []string                   `json:"quality_options"`
+	Enabled           bool                       `json:"enabled"`
+	SortOrder         int                        `json:"sort_order"`
+	CreatedAt         int64                      `json:"created_at"`
+	UpdatedAt         int64                      `json:"updated_at"`
+	Upstreams         []AIImageModelUpstreamResp `json:"upstreams"`
+}
+
+type AIImageModelSizeOption struct {
+	Label       string `json:"label"`
+	Value       string `json:"value"`
+	AspectRatio string `json:"aspect_ratio"`
+	Tier        string `json:"tier"`
 }
 
 type AIImageSettingReq struct {

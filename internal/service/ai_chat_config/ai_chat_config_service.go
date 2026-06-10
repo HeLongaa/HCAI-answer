@@ -1075,11 +1075,13 @@ func (s *aiChatConfigService) CreateImageProvider(ctx context.Context, req *sche
 		return nil, errors.BadRequest("base_url is invalid")
 	}
 	provider := &entity.AIImageProvider{
-		Name:    strings.TrimSpace(req.Name),
-		BaseURL: baseURL,
-		APIKey:  strings.TrimSpace(req.APIKey),
-		Enabled: req.Enabled,
-		Remark:  req.Remark,
+		Name:                strings.TrimSpace(req.Name),
+		BaseURL:             baseURL,
+		APIKey:              strings.TrimSpace(req.APIKey),
+		APIFormat:           normalizeImageProviderAPIFormat(req.APIFormat),
+		Flow2APIModelGroups: encodeFlow2APIModelGroups(req.Flow2APIModelGroups),
+		Enabled:             req.Enabled,
+		Remark:              req.Remark,
 	}
 	if err := s.repo.CreateImageProvider(ctx, provider); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
@@ -1104,9 +1106,11 @@ func (s *aiChatConfigService) UpdateImageProvider(ctx context.Context, id int, r
 	}
 	provider.Name = strings.TrimSpace(req.Name)
 	provider.BaseURL = baseURL
+	provider.APIFormat = normalizeImageProviderAPIFormat(req.APIFormat)
+	provider.Flow2APIModelGroups = encodeFlow2APIModelGroups(req.Flow2APIModelGroups)
 	provider.Enabled = req.Enabled
 	provider.Remark = req.Remark
-	cols := []string{"name", "base_url", "enabled", "remark"}
+	cols := []string{"name", "base_url", "api_format", "flow2api_model_groups", "enabled", "remark"}
 	if strings.TrimSpace(req.APIKey) != "" && !isAllMask(req.APIKey) {
 		provider.APIKey = strings.TrimSpace(req.APIKey)
 		cols = append(cols, "api_key")
@@ -1150,6 +1154,20 @@ func (s *aiChatConfigService) ListImageModels(ctx context.Context, onlyEnabled b
 		}
 		resp = append(resp, modelResp)
 	}
+	if onlyEnabled {
+		providers, err := s.repo.ListImageProviders(ctx)
+		if err != nil {
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
+		for _, provider := range providers {
+			if !provider.Enabled || !isFlow2APIImageProvider(provider) {
+				continue
+			}
+			for _, group := range decodeFlow2APIModelGroups(provider.Flow2APIModelGroups) {
+				resp = append(resp, flow2APIImageModelResp(provider, group))
+			}
+		}
+	}
 	return resp, nil
 }
 
@@ -1169,17 +1187,23 @@ func (s *aiChatConfigService) SaveImageModel(ctx context.Context, id int, req *s
 	if strings.TrimSpace(req.DefaultSize) == "" {
 		req.DefaultSize = "1024x1024"
 	}
-	req.APIMode = normalizeImageAPIMode(req.APIMode)
-	req.DefaultQuality = normalizeImageDefaultQuality(req.DefaultQuality)
-	req.DefaultFormat = normalizeImageDefaultFormat(req.DefaultFormat)
-	extraConfig, err := s.mergeImageModelExtraConfig(ctx, req.ExtraConfig, req.AgentModelID, req.Upstreams)
+	provider, exist, err := s.repo.GetImageProvider(ctx, req.ProviderID)
 	if err != nil {
-		return nil, err
-	}
-	if _, exist, err := s.repo.GetImageProvider(ctx, req.ProviderID); err != nil {
 		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 	} else if !exist {
 		return nil, errors.BadRequest("provider is not available")
+	}
+	req.APIMode = normalizeImageAPIMode(req.APIMode)
+	if isGrokImageProvider(provider) {
+		req.DefaultQuality = normalizeGrokImageQuality(req.DefaultQuality)
+	} else {
+		req.DefaultQuality = normalizeImageDefaultQuality(req.DefaultQuality)
+		req.QualityModelID = ""
+	}
+	req.DefaultFormat = normalizeImageDefaultFormat(req.DefaultFormat)
+	extraConfig, err := s.mergeImageModelExtraConfig(ctx, req.ExtraConfig, req.AgentModelID, req.QualityModelID, req.Upstreams)
+	if err != nil {
+		return nil, err
 	}
 	siteModelID := strings.TrimSpace(req.SiteModelID)
 	existingBySiteID, siteIDExists, err := s.repo.GetImageModelBySiteModelID(ctx, siteModelID)
@@ -1362,31 +1386,38 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 	if err != nil {
 		return nil, err
 	}
-	model, exist, err := s.repo.GetImageModelBySiteModelID(ctx, req.Model)
-	if err != nil {
-		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
-	}
-	if !exist || !model.Enabled {
-		return nil, errors.BadRequest("image model is not available")
-	}
-	upstream, err := s.selectImageModelUpstream(ctx, model)
+	model, provider, upstreamModel, err := s.resolveImageGenerationModel(ctx, req.Model, req.Size)
 	if err != nil {
 		return nil, err
 	}
-	provider := upstream.Provider
-	upstreamModel := upstream.Model
 	if strings.TrimSpace(req.Size) == "" {
 		req.Size = model.DefaultSize
 	}
-	req.Size = normalizeOpenAIImageSize(req.Size, req.AspectRatio)
+	if isFlow2APIImageProvider(provider) {
+		req.Size = normalizeFlow2APIImageSize(req.Size)
+	} else if isGrokImageProvider(provider) {
+		req.Size = normalizeGrokImageSize(req.Size)
+	} else {
+		req.Size = normalizeOpenAIImageSize(req.Size, req.AspectRatio)
+	}
 	req.AspectRatio = imageAspectRatio(req.Size)
 	if strings.TrimSpace(req.Quality) == "" {
 		req.Quality = model.DefaultQuality
 	}
-	req.Quality = normalizeOpenAIImageQuality(req.Quality)
+	if isFlow2APIImageProvider(provider) {
+		req.Quality = "auto"
+	} else if isGrokImageProvider(provider) {
+		req.Quality = normalizeGrokImageQuality(req.Quality)
+	} else {
+		req.Quality = normalizeOpenAIImageQuality(req.Quality)
+	}
 	req.OutputFormat = normalizeImageDefaultFormat(fallbackText(req.OutputFormat, model.DefaultFormat))
 	req.Moderation = normalizeImageModeration(req.Moderation)
 	req.Background = normalizeImageBackground(req.Background)
+	actualProviderModelID := upstreamModel.ProviderModelID
+	if isGrokImageProvider(provider) {
+		actualProviderModelID = grokImageProviderModelID(upstreamModel, req.Quality)
+	}
 	referenceImagesJSON, _ := json.Marshal(req.ReferenceImages)
 	generationID := "img_" + uid.IDStr()
 	runCtx := context.WithoutCancel(ctx)
@@ -1400,7 +1431,7 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 		SiteModelID:      model.SiteModelID,
 		ProviderID:       provider.ID,
 		ProviderName:     provider.Name,
-		ProviderModelID:  upstreamModel.ProviderModelID,
+		ProviderModelID:  actualProviderModelID,
 		Prompt:           req.Prompt,
 		NegativePrompt:   req.NegativePrompt,
 		AspectRatio:      req.AspectRatio,
@@ -1430,13 +1461,13 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 	}
 	log.Infof(
 		"ai image generation start generation_id=%s user_id=%s site_model=%s provider=%s provider_model=%s size=%s aspect_ratio=%s quality=%s count=%d references=%d",
-		generationID, userID, model.SiteModelID, provider.Name, upstreamModel.ProviderModelID, req.Size, req.AspectRatio, req.Quality, req.Count, len(req.ReferenceImages),
+		generationID, userID, model.SiteModelID, provider.Name, actualProviderModelID, req.Size, req.AspectRatio, req.Quality, req.Count, len(req.ReferenceImages),
 	)
 	imageURLs, err := s.callAndSaveImages(runCtx, provider, upstreamModel, generationID, userID, req)
 	if err != nil {
 		log.Errorf(
 			"ai image generation failed generation_id=%s user_id=%s site_model=%s provider=%s provider_model=%s references=%d error=%v",
-			generationID, userID, model.SiteModelID, provider.Name, upstreamModel.ProviderModelID, len(req.ReferenceImages), err,
+			generationID, userID, model.SiteModelID, provider.Name, actualProviderModelID, len(req.ReferenceImages), err,
 		)
 		updateErr := s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{
 			Status: "failed",
@@ -1525,15 +1556,27 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 	if strings.TrimSpace(req.Size) == "" {
 		req.Size = model.DefaultSize
 	}
-	req.Size = normalizeOpenAIImageSize(req.Size, req.AspectRatio)
+	if isGrokImageProvider(provider) {
+		req.Size = normalizeGrokImageSize(req.Size)
+	} else {
+		req.Size = normalizeOpenAIImageSize(req.Size, req.AspectRatio)
+	}
 	req.AspectRatio = imageAspectRatio(req.Size)
 	if strings.TrimSpace(req.Quality) == "" {
 		req.Quality = model.DefaultQuality
 	}
-	req.Quality = normalizeOpenAIImageQuality(req.Quality)
+	if isGrokImageProvider(provider) {
+		req.Quality = normalizeGrokImageQuality(req.Quality)
+	} else {
+		req.Quality = normalizeOpenAIImageQuality(req.Quality)
+	}
 	req.OutputFormat = normalizeImageDefaultFormat(fallbackText(req.OutputFormat, model.DefaultFormat))
 	req.Moderation = normalizeImageModeration(req.Moderation)
 	req.Background = normalizeImageBackground(req.Background)
+	actualProviderModelID := upstreamModel.ProviderModelID
+	if isGrokImageProvider(provider) {
+		actualProviderModelID = grokImageProviderModelID(upstreamModel, req.Quality)
+	}
 
 	generationID := "img_" + uid.IDStr()
 	runCtx := context.WithoutCancel(ctx)
@@ -1548,7 +1591,7 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 		SiteModelID:      model.SiteModelID,
 		ProviderID:       provider.ID,
 		ProviderName:     provider.Name,
-		ProviderModelID:  upstreamModel.ProviderModelID,
+		ProviderModelID:  actualProviderModelID,
 		Prompt:           req.Prompt,
 		NegativePrompt:   req.NegativePrompt,
 		AspectRatio:      req.AspectRatio,
@@ -1576,7 +1619,7 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 	}
 
 	endpoint := "/images/generations"
-	payload := s.buildImageStreamPayload(upstreamModel, req)
+	payload := s.buildImageStreamPayload(provider, upstreamModel, req)
 	if apiMode == "responses" {
 		endpoint = "/responses"
 		payload = s.buildResponsesImageStreamPayload(upstreamModel, req)
@@ -2071,7 +2114,7 @@ func writeImageStreamDownstream(ctx context.Context, timeout time.Duration, writ
 	}
 }
 
-func (s *aiChatConfigService) buildImageStreamPayload(model *entity.AIImageModel, req *schema.AIImageGenerateReq) map[string]any {
+func (s *aiChatConfigService) buildImageStreamPayload(provider *entity.AIImageProvider, model *entity.AIImageModel, req *schema.AIImageGenerateReq) map[string]any {
 	payload := map[string]any{
 		"model":          model.ProviderModelID,
 		"prompt":         buildImagePrompt(req),
@@ -2079,22 +2122,32 @@ func (s *aiChatConfigService) buildImageStreamPayload(model *entity.AIImageModel
 		"stream":         true,
 		"partial_images": req.PartialImages,
 	}
+	isGrokModel := isGrokImageProvider(provider)
+	if isGrokModel {
+		resolution, aspectRatio := grokImageRequestParams(req.Size)
+		payload["model"] = grokImageProviderModelID(model, req.Quality)
+		payload["resolution"] = resolution
+		payload["aspect_ratio"] = aspectRatio
+		payload["response_format"] = "b64_json"
+		delete(payload, "size")
+		delete(payload, "partial_images")
+	}
 	if shouldRequestImageResponseFormat(model.ProviderModelID) {
 		payload["response_format"] = "b64_json"
 	}
-	if req.Quality != "" {
+	if req.Quality != "" && !isGrokModel {
 		payload["quality"] = req.Quality
 	}
-	if req.OutputFormat != "" {
+	if req.OutputFormat != "" && !isGrokModel {
 		payload["output_format"] = req.OutputFormat
 	}
-	if req.OutputFormat != "png" && req.Compression > 0 {
+	if req.OutputFormat != "png" && req.Compression > 0 && !isGrokModel {
 		payload["output_compression"] = max(0, min(100, req.Compression))
 	}
-	if req.Moderation != "" {
+	if req.Moderation != "" && !isGrokModel {
 		payload["moderation"] = req.Moderation
 	}
-	if req.Background != "" && req.Background != "auto" {
+	if req.Background != "" && req.Background != "auto" && !isGrokModel {
 		payload["background"] = req.Background
 	}
 	return payload
@@ -3027,14 +3080,16 @@ func (s *aiChatConfigService) formatImageProvider(provider *entity.AIImageProvid
 		apiKey = maskSecret(apiKey)
 	}
 	return &schema.AIImageProviderResp{
-		ID:        provider.ID,
-		Name:      provider.Name,
-		BaseURL:   provider.BaseURL,
-		APIKey:    apiKey,
-		Enabled:   provider.Enabled,
-		Remark:    provider.Remark,
-		CreatedAt: provider.CreatedAt.Unix(),
-		UpdatedAt: provider.UpdatedAt.Unix(),
+		ID:                  provider.ID,
+		Name:                provider.Name,
+		BaseURL:             provider.BaseURL,
+		APIKey:              apiKey,
+		APIFormat:           normalizeImageProviderAPIFormat(provider.APIFormat),
+		Flow2APIModelGroups: decodeFlow2APIModelGroups(provider.Flow2APIModelGroups),
+		Enabled:             provider.Enabled,
+		Remark:              provider.Remark,
+		CreatedAt:           provider.CreatedAt.Unix(),
+		UpdatedAt:           provider.UpdatedAt.Unix(),
 	}
 }
 
@@ -3051,28 +3106,33 @@ func (s *aiChatConfigService) formatImageModel(ctx context.Context, model *entit
 	if err != nil {
 		return nil, err
 	}
+	providerAPIFormat := normalizeImageProviderAPIFormat(provider.APIFormat)
 	return &schema.AIImageModelResp{
-		ID:              model.ID,
-		ProviderID:      model.ProviderID,
-		ProviderName:    providerName,
-		SiteModelID:     model.SiteModelID,
-		ProviderModelID: model.ProviderModelID,
-		AgentModelID:    getImageAgentModelID(model),
-		DisplayName:     fallbackText(model.DisplayName, model.SiteModelID),
-		Description:     model.Description,
-		DefaultSize:     model.DefaultSize,
-		APIMode:         normalizeImageAPIMode(model.APIMode),
-		SupportsEdits:   model.SupportsEdits,
-		SupportsRefs:    model.SupportsRefs,
-		SupportsStream:  model.SupportsStream,
-		DefaultQuality:  normalizeImageDefaultQuality(model.DefaultQuality),
-		DefaultFormat:   normalizeImageDefaultFormat(model.DefaultFormat),
-		ExtraConfig:     model.ExtraConfig,
-		Enabled:         model.Enabled,
-		SortOrder:       model.SortOrder,
-		CreatedAt:       model.CreatedAt.Unix(),
-		UpdatedAt:       model.UpdatedAt.Unix(),
-		Upstreams:       upstreams,
+		ID:                model.ID,
+		ProviderID:        model.ProviderID,
+		ProviderName:      providerName,
+		SiteModelID:       model.SiteModelID,
+		ProviderModelID:   model.ProviderModelID,
+		QualityModelID:    getImageQualityModelID(model),
+		AgentModelID:      getImageAgentModelID(model),
+		DisplayName:       fallbackText(model.DisplayName, model.SiteModelID),
+		Description:       model.Description,
+		DefaultSize:       model.DefaultSize,
+		APIMode:           normalizeImageAPIMode(model.APIMode),
+		SupportsEdits:     model.SupportsEdits,
+		SupportsRefs:      model.SupportsRefs,
+		SupportsStream:    model.SupportsStream,
+		DefaultQuality:    normalizeImageDefaultQuality(model.DefaultQuality),
+		DefaultFormat:     normalizeImageDefaultFormat(model.DefaultFormat),
+		ExtraConfig:       model.ExtraConfig,
+		ProviderAPIFormat: providerAPIFormat,
+		SizeOptions:       imageModelSizeOptionsForModel(model, providerAPIFormat),
+		QualityOptions:    imageModelQualityOptionsForModel(model, providerAPIFormat),
+		Enabled:           model.Enabled,
+		SortOrder:         model.SortOrder,
+		CreatedAt:         model.CreatedAt.Unix(),
+		UpdatedAt:         model.UpdatedAt.Unix(),
+		Upstreams:         upstreams,
 	}, nil
 }
 
@@ -3244,30 +3304,52 @@ func (s *aiChatConfigService) callAndSaveImages(
 
 	baseURL := strings.TrimRight(provider.BaseURL, "/")
 	prompt := buildImagePrompt(req)
+	if isGeminiLikeImageProvider(provider) {
+		preparedImages, err := prepareReferenceImages(ctx, req.ReferenceImages, referenceImageOptions{})
+		if err != nil {
+			log.Errorf("ai image gemini reference prepare failed generation_id=%s error=%v", generationID, err)
+			return nil, err
+		}
+		if len(preparedImages) > 0 && !model.SupportsRefs {
+			return nil, fmt.Errorf("image model does not support reference images")
+		}
+		log.Infof("ai image upstream route generation_id=%s api_format=gemini references=%d", generationID, len(preparedImages))
+		return s.callGeminiImageAPI(ctx, newImageRestyClient(), baseURL, provider, model, generationID, userID, prompt, preparedImages)
+	}
 	payload := map[string]any{
 		"model":  model.ProviderModelID,
 		"prompt": prompt,
 		"size":   req.Size,
 	}
+	isGrokModel := isGrokImageProvider(provider)
+	if isGrokModel {
+		resolution, aspectRatio := grokImageRequestParams(req.Size)
+		payload["model"] = grokImageProviderModelID(model, req.Quality)
+		payload["resolution"] = resolution
+		payload["aspect_ratio"] = aspectRatio
+		payload["response_format"] = "b64_json"
+		payload["n"] = req.Count
+		delete(payload, "size")
+	}
 	if shouldRequestImageResponseFormat(model.ProviderModelID) {
 		payload["response_format"] = "b64_json"
 	}
-	if req.Count > 1 {
+	if req.Count > 1 && !isGrokModel {
 		payload["n"] = req.Count
 	}
-	if req.Quality != "" {
+	if req.Quality != "" && !isGrokModel {
 		payload["quality"] = req.Quality
 	}
-	if req.OutputFormat != "" {
+	if req.OutputFormat != "" && !isGrokModel {
 		payload["output_format"] = req.OutputFormat
 	}
-	if req.OutputFormat != "png" && req.Compression > 0 {
+	if req.OutputFormat != "png" && req.Compression > 0 && !isGrokModel {
 		payload["output_compression"] = max(0, min(100, req.Compression))
 	}
-	if req.Moderation != "" {
+	if req.Moderation != "" && !isGrokModel {
 		payload["moderation"] = req.Moderation
 	}
-	if req.Background != "" && req.Background != "auto" {
+	if req.Background != "" && req.Background != "auto" && !isGrokModel {
 		payload["background"] = req.Background
 	}
 	if normalizeImageAPIMode(model.APIMode) == "responses" {
@@ -3541,6 +3623,107 @@ func (s *aiChatConfigService) callImageEditsAPI(
 	}
 	log.Infof("ai image upstream success generation_id=%s endpoint=%s field_mode=%s status=%d bytes=%d", generationID, "/images/edits", fieldMode, resp.StatusCode(), len(resp.Body()))
 	return s.saveImageAPIResponse(ctx, userID, generationID, resp.Body())
+}
+
+func (s *aiChatConfigService) callGeminiImageAPI(
+	ctx context.Context,
+	client *resty.Client,
+	baseURL string,
+	provider *entity.AIImageProvider,
+	model *entity.AIImageModel,
+	generationID string,
+	userID string,
+	prompt string,
+	referenceImages []*preparedReferenceImage,
+) ([]string, error) {
+	parts := []map[string]any{{"text": prompt}}
+	for _, image := range referenceImages {
+		parts = append(parts, map[string]any{
+			"inlineData": map[string]any{
+				"mimeType": image.MIME,
+				"data":     base64.StdEncoding.EncodeToString(image.Data),
+			},
+		})
+	}
+	body := map[string]any{
+		"contents": []map[string]any{
+			{
+				"role":  "user",
+				"parts": parts,
+			},
+		},
+		"generationConfig": map[string]any{
+			"responseModalities": []string{"IMAGE"},
+		},
+	}
+	endpoint := "/v1beta/models/" + url.PathEscape(model.ProviderModelID) + ":generateContent"
+	log.Infof("ai image upstream request generation_id=%s endpoint=%s model=%s references=%d", generationID, endpoint, model.ProviderModelID, len(referenceImages))
+	resp, err := client.R().
+		SetContext(ctx).
+		SetHeader("Content-Type", "application/json").
+		SetHeader("x-goog-api-key", provider.APIKey).
+		SetBody(body).
+		Post(baseURL + endpoint)
+	if err != nil {
+		log.Errorf("ai image upstream request failed generation_id=%s endpoint=%s error=%v", generationID, endpoint, err)
+		return nil, err
+	}
+	if !resp.IsSuccess() {
+		log.Errorf("ai image upstream non-success generation_id=%s endpoint=%s status=%d body=%s", generationID, endpoint, resp.StatusCode(), responseSnippet(resp.Body()))
+		return nil, fmt.Errorf("gemini status %d: %s", resp.StatusCode(), resp.String())
+	}
+	log.Infof("ai image upstream success generation_id=%s endpoint=%s status=%d bytes=%d", generationID, endpoint, resp.StatusCode(), len(resp.Body()))
+	return s.saveGeminiImageResponse(ctx, userID, generationID, resp.Body())
+}
+
+func (s *aiChatConfigService) saveGeminiImageResponse(_ context.Context, userID, generationID string, body []byte) ([]string, error) {
+	var parsed struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					InlineData struct {
+						MimeType string `json:"mimeType"`
+						Data     string `json:"data"`
+					} `json:"inlineData"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		log.Errorf("ai image gemini response parse failed generation_id=%s bytes=%d body=%s error=%v", generationID, len(body), responseSnippet(body), err)
+		return nil, err
+	}
+	imageURLs := make([]string, 0)
+	index := 0
+	for _, candidate := range parsed.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if strings.TrimSpace(part.InlineData.Data) == "" {
+				continue
+			}
+			data, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
+			if err != nil {
+				log.Errorf("ai image gemini response b64 decode failed generation_id=%s index=%d error=%v", generationID, index, err)
+				return nil, err
+			}
+			ext := ".png"
+			if exts, _ := mime.ExtensionsByType(part.InlineData.MimeType); len(exts) > 0 {
+				ext = exts[0]
+			}
+			url, err := s.saveGeneratedImage(userID, generationID, index, ext, data)
+			if err != nil {
+				log.Errorf("ai image gemini save file failed generation_id=%s index=%d ext=%s bytes=%d error=%v", generationID, index, ext, len(data), err)
+				return nil, err
+			}
+			imageURLs = append(imageURLs, url)
+			index++
+		}
+	}
+	if len(imageURLs) == 0 {
+		log.Errorf("ai image gemini response empty generation_id=%s bytes=%d body=%s", generationID, len(body), responseSnippet(body))
+		return nil, fmt.Errorf("empty gemini image response")
+	}
+	log.Infof("ai image gemini response saved generation_id=%s image_count=%d", generationID, len(imageURLs))
+	return imageURLs, nil
 }
 
 func (s *aiChatConfigService) saveImageAPIResponse(ctx context.Context, userID, generationID string, body []byte) ([]string, error) {
@@ -4285,6 +4468,36 @@ func normalizeImageAPIMode(value string) string {
 	}
 }
 
+func normalizeImageProviderAPIFormat(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "gemini":
+		return "gemini"
+	case "flow2api":
+		return "flow2api"
+	case "grok", "xai":
+		return "grok"
+	default:
+		return "openai"
+	}
+}
+
+func isGeminiImageProvider(provider *entity.AIImageProvider) bool {
+	return normalizeImageProviderAPIFormat(provider.APIFormat) == "gemini"
+}
+
+func isFlow2APIImageProvider(provider *entity.AIImageProvider) bool {
+	return normalizeImageProviderAPIFormat(provider.APIFormat) == "flow2api"
+}
+
+func isGrokImageProvider(provider *entity.AIImageProvider) bool {
+	return normalizeImageProviderAPIFormat(provider.APIFormat) == "grok"
+}
+
+func isGeminiLikeImageProvider(provider *entity.AIImageProvider) bool {
+	format := normalizeImageProviderAPIFormat(provider.APIFormat)
+	return format == "gemini" || format == "flow2api"
+}
+
 func normalizeImageDefaultQuality(value string) string {
 	quality := normalizeOpenAIImageQuality(value)
 	if quality == "" {
@@ -4327,6 +4540,7 @@ func normalizeImageBackground(value string) string {
 type imageModelUpstreamConfig struct {
 	ProviderID       int    `json:"provider_id"`
 	ProviderModelID  string `json:"provider_model_id"`
+	QualityModelID   string `json:"quality_model_id,omitempty"`
 	AgentModelID     string `json:"agent_model_id,omitempty"`
 	ResponsesModelID string `json:"responses_model_id,omitempty"`
 	Weight           int    `json:"weight,omitempty"`
@@ -4339,7 +4553,319 @@ type selectedImageModelUpstream struct {
 	Config   imageModelUpstreamConfig
 }
 
-func (s *aiChatConfigService) mergeImageModelExtraConfig(ctx context.Context, raw, agentModelID string, upstreamReqs []schema.AIImageModelUpstreamReq) (string, error) {
+const (
+	flow2APIGroupFlash31 = "gemini-3.1-flash-image"
+	flow2APIGroupPro30   = "gemini-3.0-pro-image"
+)
+
+var flow2APIAllowedModelGroups = []string{
+	flow2APIGroupFlash31,
+	flow2APIGroupPro30,
+}
+
+type imageSizePreset struct {
+	Label       string
+	Value       string
+	AspectRatio string
+	Tier        string
+	Suffix      string
+}
+
+var flow2APISizePresets = []imageSizePreset{
+	{Label: "横屏", Value: "1280x720", AspectRatio: "16:9", Tier: "1K", Suffix: "landscape"},
+	{Label: "竖屏", Value: "720x1280", AspectRatio: "9:16", Tier: "1K", Suffix: "portrait"},
+	{Label: "方图", Value: "1024x1024", AspectRatio: "1:1", Tier: "1K", Suffix: "square"},
+	{Label: "横屏 4:3", Value: "1024x768", AspectRatio: "4:3", Tier: "1K", Suffix: "four-three"},
+	{Label: "竖屏 3:4", Value: "768x1024", AspectRatio: "3:4", Tier: "1K", Suffix: "three-four"},
+	{Label: "横屏 2K", Value: "2560x1440", AspectRatio: "16:9", Tier: "2K", Suffix: "landscape-2k"},
+	{Label: "竖屏 2K", Value: "1440x2560", AspectRatio: "9:16", Tier: "2K", Suffix: "portrait-2k"},
+	{Label: "方图 2K", Value: "2048x2048", AspectRatio: "1:1", Tier: "2K", Suffix: "square-2k"},
+	{Label: "横屏 4:3 2K", Value: "2048x1536", AspectRatio: "4:3", Tier: "2K", Suffix: "four-three-2k"},
+	{Label: "竖屏 3:4 2K", Value: "1536x2048", AspectRatio: "3:4", Tier: "2K", Suffix: "three-four-2k"},
+	{Label: "横屏 4K", Value: "3840x2160", AspectRatio: "16:9", Tier: "4K", Suffix: "landscape-4k"},
+	{Label: "竖屏 4K", Value: "2160x3840", AspectRatio: "9:16", Tier: "4K", Suffix: "portrait-4k"},
+	{Label: "方图 4K", Value: "2880x2880", AspectRatio: "1:1", Tier: "4K", Suffix: "square-4k"},
+	{Label: "横屏 4:3 4K", Value: "3200x2400", AspectRatio: "4:3", Tier: "4K", Suffix: "four-three-4k"},
+	{Label: "竖屏 3:4 4K", Value: "2400x3200", AspectRatio: "3:4", Tier: "4K", Suffix: "three-four-4k"},
+}
+
+var grokImageSizePresets = []imageSizePreset{
+	{Label: "方图", Value: "1024x1024", AspectRatio: "1:1", Tier: "1K"},
+	{Label: "横屏 3:2", Value: "1536x1024", AspectRatio: "3:2", Tier: "1K"},
+	{Label: "竖屏 2:3", Value: "1024x1536", AspectRatio: "2:3", Tier: "1K"},
+	{Label: "横屏", Value: "1280x720", AspectRatio: "16:9", Tier: "1K"},
+	{Label: "竖屏", Value: "720x1280", AspectRatio: "9:16", Tier: "1K"},
+	{Label: "横屏 4:3", Value: "1024x768", AspectRatio: "4:3", Tier: "1K"},
+	{Label: "竖屏 3:4", Value: "768x1024", AspectRatio: "3:4", Tier: "1K"},
+	{Label: "方图 2K", Value: "2048x2048", AspectRatio: "1:1", Tier: "2K"},
+	{Label: "横屏 3:2 2K", Value: "2160x1440", AspectRatio: "3:2", Tier: "2K"},
+	{Label: "竖屏 2:3 2K", Value: "1440x2160", AspectRatio: "2:3", Tier: "2K"},
+	{Label: "横屏 2K", Value: "2560x1440", AspectRatio: "16:9", Tier: "2K"},
+	{Label: "竖屏 2K", Value: "1440x2560", AspectRatio: "9:16", Tier: "2K"},
+	{Label: "横屏 4:3 2K", Value: "2048x1536", AspectRatio: "4:3", Tier: "2K"},
+	{Label: "竖屏 3:4 2K", Value: "1536x2048", AspectRatio: "3:4", Tier: "2K"},
+}
+
+func encodeFlow2APIModelGroups(groups []string) string {
+	normalized := normalizeFlow2APIModelGroups(groups)
+	raw, _ := json.Marshal(normalized)
+	return string(raw)
+}
+
+func decodeFlow2APIModelGroups(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	groups := make([]string, 0)
+	if err := json.Unmarshal([]byte(raw), &groups); err != nil {
+		return nil
+	}
+	return normalizeFlow2APIModelGroups(groups)
+}
+
+func normalizeFlow2APIModelGroups(groups []string) []string {
+	allowed := make(map[string]bool, len(flow2APIAllowedModelGroups))
+	for _, group := range flow2APIAllowedModelGroups {
+		allowed[group] = true
+	}
+	seen := make(map[string]bool, len(groups))
+	normalized := make([]string, 0, len(groups))
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if !allowed[group] || seen[group] {
+			continue
+		}
+		seen[group] = true
+		normalized = append(normalized, group)
+	}
+	return normalized
+}
+
+func flow2APIImageModelResp(provider *entity.AIImageProvider, group string) *schema.AIImageModelResp {
+	return &schema.AIImageModelResp{
+		ID:                0,
+		ProviderID:        provider.ID,
+		ProviderName:      provider.Name,
+		SiteModelID:       group,
+		ProviderModelID:   group,
+		DisplayName:       group,
+		Description:       "Flow2API 图片模型组",
+		DefaultSize:       "1024x1024",
+		APIMode:           "images",
+		SupportsEdits:     true,
+		SupportsRefs:      true,
+		SupportsStream:    false,
+		DefaultQuality:    "auto",
+		DefaultFormat:     "png",
+		ProviderAPIFormat: "flow2api",
+		SizeOptions:       imageModelSizeOptions("flow2api"),
+		QualityOptions:    imageModelQualityOptions("flow2api"),
+		Enabled:           provider.Enabled,
+		SortOrder:         0,
+		CreatedAt:         provider.CreatedAt.Unix(),
+		UpdatedAt:         provider.UpdatedAt.Unix(),
+	}
+}
+
+func imageModelSizeOptions(providerAPIFormat string) []schema.AIImageModelSizeOption {
+	switch normalizeImageProviderAPIFormat(providerAPIFormat) {
+	case "flow2api":
+		return sizePresetOptions(flow2APISizePresets)
+	case "grok":
+		return sizePresetOptions(grokImageSizePresets)
+	default:
+		return nil
+	}
+}
+
+func isGrokImageProviderFormat(providerAPIFormat string) bool {
+	return normalizeImageProviderAPIFormat(providerAPIFormat) == "grok"
+}
+
+func imageModelSizeOptionsForModel(_ *entity.AIImageModel, providerAPIFormat string) []schema.AIImageModelSizeOption {
+	return imageModelSizeOptions(providerAPIFormat)
+}
+
+func sizePresetOptions(presets []imageSizePreset) []schema.AIImageModelSizeOption {
+	options := make([]schema.AIImageModelSizeOption, 0, len(presets))
+	for _, preset := range presets {
+		options = append(options, schema.AIImageModelSizeOption{
+			Label:       preset.Label,
+			Value:       preset.Value,
+			AspectRatio: preset.AspectRatio,
+			Tier:        preset.Tier,
+		})
+	}
+	return options
+}
+
+func imageModelQualityOptions(providerAPIFormat string) []string {
+	switch normalizeImageProviderAPIFormat(providerAPIFormat) {
+	case "flow2api":
+		return []string{"auto"}
+	default:
+		return nil
+	}
+}
+
+func imageModelQualityOptionsForModel(model *entity.AIImageModel, providerAPIFormat string) []string {
+	if isGrokImageProviderFormat(providerAPIFormat) {
+		if getGrokImageQualityModelID(model) != "" {
+			return []string{"auto", "low", "high"}
+		}
+		return []string{"auto", "low"}
+	}
+	return imageModelQualityOptions(providerAPIFormat)
+}
+
+func normalizeFlow2APIImageSize(size string) string {
+	normalized := normalizeImageSizeString(size)
+	if normalized == "" || normalized == "auto" {
+		return "1024x1024"
+	}
+	for _, preset := range flow2APISizePresets {
+		if normalized == preset.Value {
+			return preset.Value
+		}
+	}
+	return "1024x1024"
+}
+
+func grokImageProviderModelID(model *entity.AIImageModel, quality string) string {
+	standardModelID := strings.TrimSpace(model.ProviderModelID)
+	switch strings.ToLower(strings.TrimSpace(quality)) {
+	case "high":
+		if qualityModelID := getGrokImageQualityModelID(model); qualityModelID != "" {
+			return qualityModelID
+		}
+	}
+	return standardModelID
+}
+
+func normalizeGrokImageQuality(quality string) string {
+	switch strings.ToLower(strings.TrimSpace(quality)) {
+	case "high":
+		return "high"
+	case "low":
+		return "low"
+	default:
+		return "auto"
+	}
+}
+
+func defaultGrokQualityModelID(modelID string) string {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "grok-imagine-image" {
+		return "grok-imagine-image-quality"
+	}
+	return ""
+}
+
+func normalizeGrokImageSize(size string) string {
+	normalized := normalizeImageSizeString(size)
+	if normalized == "" || normalized == "auto" {
+		return "1024x1024"
+	}
+	for _, preset := range grokImageSizePresets {
+		if normalized == preset.Value {
+			return preset.Value
+		}
+	}
+	return "1024x1024"
+}
+
+func grokImageRequestParams(size string) (string, string) {
+	normalizedSize := normalizeGrokImageSize(size)
+	for _, preset := range grokImageSizePresets {
+		if preset.Value != normalizedSize {
+			continue
+		}
+		resolution := "1k"
+		if strings.EqualFold(preset.Tier, "2K") {
+			resolution = "2k"
+		}
+		return resolution, preset.AspectRatio
+	}
+	return "1k", "1:1"
+}
+
+func flow2APIProviderModelID(group, size string) (string, error) {
+	group = strings.TrimSpace(group)
+	if len(normalizeFlow2APIModelGroups([]string{group})) == 0 {
+		return "", fmt.Errorf("flow2api model group is not available")
+	}
+	normalizedSize := normalizeFlow2APIImageSize(size)
+	for _, preset := range flow2APISizePresets {
+		if preset.Value == normalizedSize {
+			return group + "-" + preset.Suffix, nil
+		}
+	}
+	return "", fmt.Errorf("flow2api size is not supported")
+}
+
+func normalizeImageSizeString(size string) string {
+	normalizedSize := strings.ToLower(strings.TrimSpace(size))
+	if normalizedSize == "" || normalizedSize == "auto" {
+		return normalizedSize
+	}
+	if width, height, ok := parseImageSize(normalizedSize); ok {
+		return fmt.Sprintf("%dx%d", width, height)
+	}
+	return normalizedSize
+}
+
+func (s *aiChatConfigService) resolveImageGenerationModel(ctx context.Context, siteModelID, requestedSize string) (*entity.AIImageModel, *entity.AIImageProvider, *entity.AIImageModel, error) {
+	model, exist, err := s.repo.GetImageModelBySiteModelID(ctx, siteModelID)
+	if err != nil {
+		return nil, nil, nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	if exist && model.Enabled {
+		upstream, err := s.selectImageModelUpstream(ctx, model)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return model, upstream.Provider, upstream.Model, nil
+	}
+
+	providers, err := s.repo.ListImageProviders(ctx)
+	if err != nil {
+		return nil, nil, nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	}
+	for _, provider := range providers {
+		if !provider.Enabled || !isFlow2APIImageProvider(provider) {
+			continue
+		}
+		for _, group := range decodeFlow2APIModelGroups(provider.Flow2APIModelGroups) {
+			if group != siteModelID {
+				continue
+			}
+			providerModelID, err := flow2APIProviderModelID(group, requestedSize)
+			if err != nil {
+				return nil, nil, nil, errors.BadRequest(err.Error())
+			}
+			virtualModel := &entity.AIImageModel{
+				ProviderID:      provider.ID,
+				SiteModelID:     group,
+				ProviderModelID: group,
+				DisplayName:     group,
+				DefaultSize:     normalizeFlow2APIImageSize(requestedSize),
+				APIMode:         "images",
+				SupportsEdits:   true,
+				SupportsRefs:    true,
+				SupportsStream:  false,
+				DefaultQuality:  "auto",
+				DefaultFormat:   "png",
+				Enabled:         true,
+			}
+			upstreamModel := *virtualModel
+			upstreamModel.ProviderModelID = providerModelID
+			return virtualModel, provider, &upstreamModel, nil
+		}
+	}
+	return nil, nil, nil, errors.BadRequest("image model is not available")
+}
+
+func (s *aiChatConfigService) mergeImageModelExtraConfig(ctx context.Context, raw, agentModelID, qualityModelID string, upstreamReqs []schema.AIImageModelUpstreamReq) (string, error) {
 	raw = strings.TrimSpace(raw)
 	extra := map[string]any{}
 	if raw != "" {
@@ -4351,6 +4877,11 @@ func (s *aiChatConfigService) mergeImageModelExtraConfig(ctx context.Context, ra
 		extra["agent_model_id"] = value
 	} else {
 		delete(extra, "agent_model_id")
+	}
+	if value := strings.TrimSpace(qualityModelID); value != "" {
+		extra["quality_model_id"] = value
+	} else {
+		delete(extra, "quality_model_id")
 	}
 	if upstreamReqs != nil {
 		upstreams, err := s.normalizeImageModelUpstreamReqs(ctx, upstreamReqs)
@@ -4387,10 +4918,15 @@ func (s *aiChatConfigService) normalizeImageModelUpstreamReqs(ctx context.Contex
 		if providerModelID == "" {
 			return nil, errors.BadRequest("upstream provider_model_id is required")
 		}
-		if _, exist, err := s.repo.GetImageProvider(ctx, providerID); err != nil {
+		provider, exist, err := s.repo.GetImageProvider(ctx, providerID)
+		if err != nil {
 			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
 		} else if !exist {
 			return nil, errors.BadRequest("upstream provider is not available")
+		}
+		qualityModelID := strings.TrimSpace(req.QualityModelID)
+		if !isGrokImageProvider(provider) {
+			qualityModelID = ""
 		}
 		enabled := req.Enabled
 		weight := req.Weight
@@ -4400,6 +4936,7 @@ func (s *aiChatConfigService) normalizeImageModelUpstreamReqs(ctx context.Contex
 		upstreams = append(upstreams, imageModelUpstreamConfig{
 			ProviderID:       providerID,
 			ProviderModelID:  providerModelID,
+			QualityModelID:   qualityModelID,
 			AgentModelID:     strings.TrimSpace(req.AgentModelID),
 			ResponsesModelID: strings.TrimSpace(req.ResponsesModelID),
 			Weight:           weight,
@@ -4489,13 +5026,20 @@ func imageModelWithUpstream(model *entity.AIImageModel, upstream imageModelUpstr
 	copied := *model
 	copied.ProviderID = upstream.ProviderID
 	copied.ProviderModelID = upstream.ProviderModelID
-	if strings.TrimSpace(upstream.AgentModelID) != "" || strings.TrimSpace(upstream.ResponsesModelID) != "" {
-		copied.ExtraConfig = imageModelExtraConfigWithOverrides(model.ExtraConfig, upstream.AgentModelID, upstream.ResponsesModelID)
+	if strings.TrimSpace(upstream.AgentModelID) != "" ||
+		strings.TrimSpace(upstream.ResponsesModelID) != "" ||
+		strings.TrimSpace(upstream.QualityModelID) != "" {
+		copied.ExtraConfig = imageModelExtraConfigWithOverrides(
+			model.ExtraConfig,
+			upstream.AgentModelID,
+			upstream.ResponsesModelID,
+			upstream.QualityModelID,
+		)
 	}
 	return &copied
 }
 
-func imageModelExtraConfigWithOverrides(raw, agentModelID, responsesModelID string) string {
+func imageModelExtraConfigWithOverrides(raw, agentModelID, responsesModelID, qualityModelID string) string {
 	extra := map[string]any{}
 	if strings.TrimSpace(raw) != "" {
 		_ = json.Unmarshal([]byte(raw), &extra)
@@ -4505,6 +5049,9 @@ func imageModelExtraConfigWithOverrides(raw, agentModelID, responsesModelID stri
 	}
 	if value := strings.TrimSpace(responsesModelID); value != "" {
 		extra["responses_model_id"] = value
+	}
+	if value := strings.TrimSpace(qualityModelID); value != "" {
+		extra["quality_model_id"] = value
 	}
 	body, err := json.Marshal(extra)
 	if err != nil {
@@ -4533,6 +5080,7 @@ func (s *aiChatConfigService) formatImageModelUpstreams(ctx context.Context, mod
 			ProviderID:       cfg.ProviderID,
 			ProviderName:     providerName,
 			ProviderModelID:  strings.TrimSpace(cfg.ProviderModelID),
+			QualityModelID:   strings.TrimSpace(cfg.QualityModelID),
 			AgentModelID:     strings.TrimSpace(cfg.AgentModelID),
 			ResponsesModelID: strings.TrimSpace(cfg.ResponsesModelID),
 			Weight:           weight,
@@ -4571,6 +5119,32 @@ func getImageAgentModelID(model *entity.AIImageModel) string {
 		}
 	}
 	return ""
+}
+
+func getImageQualityModelID(model *entity.AIImageModel) string {
+	return getConfiguredImageQualityModelID(model)
+}
+
+func getConfiguredImageQualityModelID(model *entity.AIImageModel) string {
+	type qualityConfig struct {
+		QualityModelID string `json:"quality_model_id"`
+	}
+	if strings.TrimSpace(model.ExtraConfig) != "" {
+		var cfg qualityConfig
+		if err := json.Unmarshal([]byte(model.ExtraConfig), &cfg); err == nil {
+			if value := strings.TrimSpace(cfg.QualityModelID); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func getGrokImageQualityModelID(model *entity.AIImageModel) string {
+	if qualityModelID := getConfiguredImageQualityModelID(model); qualityModelID != "" {
+		return qualityModelID
+	}
+	return defaultGrokQualityModelID(model.ProviderModelID)
 }
 
 func shouldRequestImageResponseFormat(model string) bool {
