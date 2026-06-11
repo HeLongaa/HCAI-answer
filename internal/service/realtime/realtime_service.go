@@ -10,6 +10,7 @@ const (
 	EventQuestionFeatured     = "question.featured"
 	EventPointsChanged        = "points.changed"
 	EventTasksChanged         = "tasks.changed"
+	EventInspirationsChanged  = "inspirations.changed"
 	EventFeaturedPostsChanged = "featured_posts.changed"
 	EventAdminUsersChanged    = "admin.users.changed"
 	EventTagChanged           = "tag.changed"

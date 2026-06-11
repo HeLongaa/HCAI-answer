@@ -43,6 +43,11 @@ const refreshFragments: Record<string, string[]> = {
     '/answer/api/v1/review/tasks',
     '/answer/admin/api/tasks',
   ],
+  'inspirations.changed': [
+    '/answer/api/v1/inspirations',
+    '/answer/api/v1/review/inspirations',
+    '/answer/admin/api/inspirations',
+  ],
   'admin.users.changed': ['/answer/admin/api/users/page'],
   'tag.changed': [
     '/answer/api/v1/tags/page',

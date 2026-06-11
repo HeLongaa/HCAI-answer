@@ -76,6 +76,7 @@ import (
 	file_record2 "github.com/apache/answer/internal/service/file_record"
 	"github.com/apache/answer/internal/service/follow"
 	"github.com/apache/answer/internal/service/importer"
+	"github.com/apache/answer/internal/service/inspiration"
 	meta2 "github.com/apache/answer/internal/service/meta"
 	"github.com/apache/answer/internal/service/meta_common"
 	"github.com/apache/answer/internal/service/noticequeue"
@@ -283,8 +284,11 @@ func initApplication(debug bool, serverConf *conf.Server, dbConf *data.Database,
 	aiConversationController := controller.NewAIConversationController(aiConversationService, featureToggleService)
 	taskSquareController := controller.NewTaskSquareController(taskSquareService)
 	taskSquareAdminController := controller_admin.NewTaskSquareAdminController(taskSquareService)
+	inspirationService := inspiration.NewInspirationService(dataData, realtimeService, siteInfoCommonService)
+	inspirationController := controller.NewInspirationController(inspirationService)
+	inspirationAdminController := controller_admin.NewInspirationAdminController(inspirationService)
 	realtimeController := controller.NewRealtimeController(realtimeService)
-	answerAPIRouter := router.NewAnswerAPIRouter(langController, userController, commentController, reportController, voteController, tagController, followController, collectionController, questionController, answerController, searchController, revisionController, rankController, userAdminController, reasonController, themeController, siteInfoController, controllerSiteInfoController, notificationController, dashboardController, uploadController, activityController, roleController, pluginController, permissionController, userPluginController, reviewController, metaController, badgeController, controller_adminBadgeController, adminAPIKeyController, aiChatConfigController, aiController, aiConversationController, mcpController, taskSquareController, taskSquareAdminController, realtimeController)
+	answerAPIRouter := router.NewAnswerAPIRouter(langController, userController, commentController, reportController, voteController, tagController, followController, collectionController, questionController, answerController, searchController, revisionController, rankController, userAdminController, reasonController, themeController, siteInfoController, controllerSiteInfoController, notificationController, dashboardController, uploadController, activityController, roleController, pluginController, permissionController, userPluginController, reviewController, metaController, badgeController, controller_adminBadgeController, adminAPIKeyController, aiChatConfigController, aiController, aiConversationController, mcpController, taskSquareController, taskSquareAdminController, inspirationController, inspirationAdminController, realtimeController)
 	swaggerRouter := router.NewSwaggerRouter(swaggerConf)
 	uiRouter := router.NewUIRouter(controllerSiteInfoController, siteInfoCommonService)
 	authUserMiddleware := middleware.NewAuthUserMiddleware(authService, siteInfoCommonService)

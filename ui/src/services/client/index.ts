@@ -33,3 +33,4 @@ export * from './review';
 export * from './badges';
 export * from './ai';
 export * from './task';
+export * from './inspiration';

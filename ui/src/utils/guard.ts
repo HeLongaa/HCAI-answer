@@ -109,6 +109,7 @@ export const IGNORE_PATH_LIST = [
   RouteAlias.confirmNewEmail,
   RouteAlias.confirmEmail,
   RouteAlias.authLanding,
+  '/inspirations',
   '/tos',
   '/privacy',
   '/user-center/',

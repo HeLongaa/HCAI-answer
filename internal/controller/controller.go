@@ -58,5 +58,6 @@ var ProviderSetController = wire.NewSet(
 	NewAIController,
 	NewAIConversationController,
 	NewTaskSquareController,
+	NewInspirationController,
 	NewRealtimeController,
 )

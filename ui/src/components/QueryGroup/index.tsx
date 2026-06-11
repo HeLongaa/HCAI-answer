@@ -56,9 +56,9 @@ const Index: FC<Props> = ({
     keyPrefix: i18nKeyPrefix,
   });
 
-  const getSortKey = (btn) => (typeof btn === 'string' ? btn : btn.sort || '');
+  const getSortKey = (btn) => (typeof btn === 'string' ? btn : btn?.sort || '');
   const getNameKey = (btn) =>
-    typeof btn === 'string' ? btn : btn.name || btn.sort || '';
+    typeof btn === 'string' ? btn : btn?.name || btn?.sort || '';
   const translateName = (name: string) =>
     t(name, {
       defaultValue: name,

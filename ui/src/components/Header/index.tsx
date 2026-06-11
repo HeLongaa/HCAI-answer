@@ -167,6 +167,7 @@ const Header: FC = () => {
     location.pathname.startsWith('/linked') ||
     location.pathname.startsWith('/posts/');
   const isTaskPage = location.pathname.startsWith('/tasks');
+  const isInspirationPage = location.pathname.startsWith('/inspirations');
   const isCommunityPage =
     isQuestionSideNavPage ||
     location.pathname.startsWith('/search') ||
@@ -188,6 +189,7 @@ const Header: FC = () => {
     isChatPage ||
     isSubscriptionPage ||
     isTaskPage ||
+    isInspirationPage ||
     isCommunityPage ||
     isAiAssistantSideNavPage ||
     location.pathname.startsWith('/admin');
@@ -331,15 +333,13 @@ const Header: FC = () => {
                 })}>
                 任务广场
               </NavLink>
-              <button
-                type="button"
-                className={classnames('segment-item header-upgrade-segment', {
-                  active: isSubscriptionPage,
-                })}
-                onClick={() => navigate('/subscription')}>
-                <Icon name="music-note-beamed" />
-                <span>升级套餐</span>
-              </button>
+              <NavLink
+                to="/inspirations"
+                className={classnames('segment-item', {
+                  active: isInspirationPage,
+                })}>
+                灵感库
+              </NavLink>
             </div>
           )}
 
@@ -370,7 +370,7 @@ const Header: FC = () => {
                 <AiSubscriptionPill />
               </Nav.Item>
             ) : null}
-            {isCommunityPage || isTaskPage ? (
+            {isCommunityPage || isTaskPage || isInspirationPage ? (
               <Nav.Item className="me-2 header-quota-pill-item">
                 <CommunityPointsPill />
               </Nav.Item>

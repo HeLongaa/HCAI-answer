@@ -101,6 +101,7 @@ export const ADMIN_NAV_MENUS = [
     children: [
       { name: 'questions', path: 'qa/questions', pathPrefix: 'qa/' },
       { name: 'tasks', path: 'tasks' },
+      { name: 'inspirations', displayName: '灵感库', path: 'inspirations' },
       { name: 'featured_posts', path: 'featured-posts' },
       { name: 'tags', path: 'tags/settings', pathPrefix: 'tags/' },
     ],

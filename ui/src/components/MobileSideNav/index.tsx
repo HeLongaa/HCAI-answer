@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 
 import classNames from 'classnames';
 
@@ -41,7 +41,6 @@ const chatNavItems = [
 
 const MobileSideNav = ({ show, onHide }) => {
   const { pathname, search } = useLocation();
-  const navigate = useNavigate();
   const isAdmin = pathname.includes('/admin');
   const isChat = pathname === '/';
   const isImageWorkspace =
@@ -68,6 +67,7 @@ const MobileSideNav = ({ show, onHide }) => {
     pathname.startsWith('/badges') ||
     pathname.startsWith('/review');
   const isTaskPage = pathname.startsWith('/tasks');
+  const isInspirationPage = pathname.startsWith('/inspirations');
   const siteInfo = siteInfoStore((state) => state.siteInfo);
   const storedChatWorkspace = Storage.get(CHAT_WORKSPACE_STORAGE_KEY);
   const workbenchPath =
@@ -124,11 +124,6 @@ const MobileSideNav = ({ show, onHide }) => {
     window.dispatchEvent(new CustomEvent('hcai-open-redeem'));
     closeSideNav();
   };
-  const goSubscriptionPurchase = () => {
-    closeSideNav();
-    navigate('/subscription');
-  };
-
   useEffect(() => {
     if (!show || !isChat) {
       return;
@@ -197,15 +192,13 @@ const MobileSideNav = ({ show, onHide }) => {
             className={isTaskPage ? 'active' : ''}>
             任务
           </NavLink>
+          <NavLink
+            to="/inspirations"
+            onClick={closeSideNav}
+            className={isInspirationPage ? 'active' : ''}>
+            灵感
+          </NavLink>
         </div>
-        <button
-          type="button"
-          className="mobile-upgrade-switch"
-          onClick={goSubscriptionPurchase}>
-          <Icon name="music-note-beamed" />
-          <span>升级套餐</span>
-        </button>
-
         {renderSideNavContent && isChat ? (
           <div className="mobile-chat-nav" aria-label="HCAI-Chat navigation">
             <nav className="mobile-chat-nav-main">

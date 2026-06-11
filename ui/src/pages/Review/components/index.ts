@@ -24,6 +24,7 @@ import SuggestContent from './SuggestContent';
 import FlagContent from './FlagContent';
 import QueuedContent from './QueuedContent';
 import TaskContent from './TaskContent';
+import InspirationContent from './InspirationContent';
 
 export {
   ReviewType,
@@ -33,4 +34,5 @@ export {
   SuggestContent,
   QueuedContent,
   TaskContent,
+  InspirationContent,
 };

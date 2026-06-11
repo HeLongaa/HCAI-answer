@@ -96,6 +96,15 @@ const Index: FC<IProps> = ({ showBrand = true }) => {
       )}
 
       <NavLink
+        to="/inspirations"
+        className={() =>
+          pathname.startsWith('/inspirations') ? 'nav-link active' : 'nav-link'
+        }>
+        <Icon name="stars" className="me-2" />
+        <span>灵感库</span>
+      </NavLink>
+
+      <NavLink
         to="/tags"
         className={() =>
           pathname === '/tags' ? 'nav-link active' : 'nav-link'

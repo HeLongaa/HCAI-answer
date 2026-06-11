@@ -88,6 +88,40 @@ const routes: RouteNode[] = [
             },
           },
           {
+            path: 'inspirations',
+            page: 'pages/Inspirations',
+          },
+          {
+            path: 'inspirations/new',
+            page: 'pages/Inspirations/New',
+            guard: () => {
+              return guard.logged();
+            },
+          },
+          {
+            path: 'inspirations/tags',
+            page: 'pages/Inspirations/Tags',
+          },
+          {
+            path: 'inspirations/ranking',
+            page: 'pages/Inspirations/Ranking',
+          },
+          {
+            path: 'inspirations/creators',
+            page: 'pages/Inspirations/Creators',
+          },
+          {
+            path: 'inspirations/:id/edit',
+            page: 'pages/Inspirations/New',
+            guard: () => {
+              return guard.logged();
+            },
+          },
+          {
+            path: 'inspirations/:id',
+            page: 'pages/Inspirations/Detail',
+          },
+          {
             path: 'questions/ask',
             page: 'pages/Questions/Ask',
             guard: () => {
@@ -395,6 +429,10 @@ const routes: RouteNode[] = [
           {
             path: 'tasks',
             page: 'pages/Admin/Tasks',
+          },
+          {
+            path: 'inspirations',
+            page: 'pages/Admin/Inspirations',
           },
           {
             path: 'featured-posts',

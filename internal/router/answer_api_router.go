@@ -27,44 +27,46 @@ import (
 )
 
 type AnswerAPIRouter struct {
-	langController            *controller.LangController
-	userController            *controller.UserController
-	commentController         *controller.CommentController
-	reportController          *controller.ReportController
-	voteController            *controller.VoteController
-	tagController             *controller.TagController
-	followController          *controller.FollowController
-	collectionController      *controller.CollectionController
-	questionController        *controller.QuestionController
-	answerController          *controller.AnswerController
-	searchController          *controller.SearchController
-	revisionController        *controller.RevisionController
-	rankController            *controller.RankController
-	adminUserController       *controller_admin.UserAdminController
-	reasonController          *controller.ReasonController
-	themeController           *controller_admin.ThemeController
-	adminSiteInfoController   *controller_admin.SiteInfoController
-	siteInfoController        *controller.SiteInfoController
-	notificationController    *controller.NotificationController
-	dashboardController       *controller.DashboardController
-	uploadController          *controller.UploadController
-	activityController        *controller.ActivityController
-	roleController            *controller_admin.RoleController
-	pluginController          *controller_admin.PluginController
-	permissionController      *controller.PermissionController
-	userPluginController      *controller.UserPluginController
-	reviewController          *controller.ReviewController
-	metaController            *controller.MetaController
-	badgeController           *controller.BadgeController
-	adminBadgeController      *controller_admin.BadgeController
-	apiKeyController          *controller_admin.AdminAPIKeyController
-	aiChatConfigController    *controller_admin.AIChatConfigController
-	aiController              *controller.AIController
-	aiConversationController  *controller.AIConversationController
-	mcpController             *controller.MCPController
-	taskSquareController      *controller.TaskSquareController
-	taskSquareAdminController *controller_admin.TaskSquareAdminController
-	realtimeController        *controller.RealtimeController
+	langController             *controller.LangController
+	userController             *controller.UserController
+	commentController          *controller.CommentController
+	reportController           *controller.ReportController
+	voteController             *controller.VoteController
+	tagController              *controller.TagController
+	followController           *controller.FollowController
+	collectionController       *controller.CollectionController
+	questionController         *controller.QuestionController
+	answerController           *controller.AnswerController
+	searchController           *controller.SearchController
+	revisionController         *controller.RevisionController
+	rankController             *controller.RankController
+	adminUserController        *controller_admin.UserAdminController
+	reasonController           *controller.ReasonController
+	themeController            *controller_admin.ThemeController
+	adminSiteInfoController    *controller_admin.SiteInfoController
+	siteInfoController         *controller.SiteInfoController
+	notificationController     *controller.NotificationController
+	dashboardController        *controller.DashboardController
+	uploadController           *controller.UploadController
+	activityController         *controller.ActivityController
+	roleController             *controller_admin.RoleController
+	pluginController           *controller_admin.PluginController
+	permissionController       *controller.PermissionController
+	userPluginController       *controller.UserPluginController
+	reviewController           *controller.ReviewController
+	metaController             *controller.MetaController
+	badgeController            *controller.BadgeController
+	adminBadgeController       *controller_admin.BadgeController
+	apiKeyController           *controller_admin.AdminAPIKeyController
+	aiChatConfigController     *controller_admin.AIChatConfigController
+	aiController               *controller.AIController
+	aiConversationController   *controller.AIConversationController
+	mcpController              *controller.MCPController
+	taskSquareController       *controller.TaskSquareController
+	taskSquareAdminController  *controller_admin.TaskSquareAdminController
+	inspirationController      *controller.InspirationController
+	inspirationAdminController *controller_admin.InspirationAdminController
+	realtimeController         *controller.RealtimeController
 }
 
 func NewAnswerAPIRouter(
@@ -105,47 +107,51 @@ func NewAnswerAPIRouter(
 	mcpController *controller.MCPController,
 	taskSquareController *controller.TaskSquareController,
 	taskSquareAdminController *controller_admin.TaskSquareAdminController,
+	inspirationController *controller.InspirationController,
+	inspirationAdminController *controller_admin.InspirationAdminController,
 	realtimeController *controller.RealtimeController,
 ) *AnswerAPIRouter {
 	return &AnswerAPIRouter{
-		langController:            langController,
-		userController:            userController,
-		commentController:         commentController,
-		reportController:          reportController,
-		voteController:            voteController,
-		tagController:             tagController,
-		followController:          followController,
-		collectionController:      collectionController,
-		questionController:        questionController,
-		answerController:          answerController,
-		searchController:          searchController,
-		revisionController:        revisionController,
-		rankController:            rankController,
-		adminUserController:       adminUserController,
-		reasonController:          reasonController,
-		themeController:           themeController,
-		adminSiteInfoController:   adminSiteInfoController,
-		notificationController:    notificationController,
-		siteInfoController:        siteInfoController,
-		dashboardController:       dashboardController,
-		uploadController:          uploadController,
-		activityController:        activityController,
-		roleController:            roleController,
-		pluginController:          pluginController,
-		permissionController:      permissionController,
-		userPluginController:      userPluginController,
-		reviewController:          reviewController,
-		metaController:            metaController,
-		badgeController:           badgeController,
-		adminBadgeController:      adminBadgeController,
-		apiKeyController:          apiKeyController,
-		aiChatConfigController:    aiChatConfigController,
-		aiController:              aiController,
-		aiConversationController:  aiConversationController,
-		mcpController:             mcpController,
-		taskSquareController:      taskSquareController,
-		taskSquareAdminController: taskSquareAdminController,
-		realtimeController:        realtimeController,
+		langController:             langController,
+		userController:             userController,
+		commentController:          commentController,
+		reportController:           reportController,
+		voteController:             voteController,
+		tagController:              tagController,
+		followController:           followController,
+		collectionController:       collectionController,
+		questionController:         questionController,
+		answerController:           answerController,
+		searchController:           searchController,
+		revisionController:         revisionController,
+		rankController:             rankController,
+		adminUserController:        adminUserController,
+		reasonController:           reasonController,
+		themeController:            themeController,
+		adminSiteInfoController:    adminSiteInfoController,
+		notificationController:     notificationController,
+		siteInfoController:         siteInfoController,
+		dashboardController:        dashboardController,
+		uploadController:           uploadController,
+		activityController:         activityController,
+		roleController:             roleController,
+		pluginController:           pluginController,
+		permissionController:       permissionController,
+		userPluginController:       userPluginController,
+		reviewController:           reviewController,
+		metaController:             metaController,
+		badgeController:            badgeController,
+		adminBadgeController:       adminBadgeController,
+		apiKeyController:           apiKeyController,
+		aiChatConfigController:     aiChatConfigController,
+		aiController:               aiController,
+		aiConversationController:   aiConversationController,
+		mcpController:              mcpController,
+		taskSquareController:       taskSquareController,
+		taskSquareAdminController:  taskSquareAdminController,
+		inspirationController:      inspirationController,
+		inspirationAdminController: inspirationAdminController,
+		realtimeController:         realtimeController,
 	}
 }
 
@@ -223,6 +229,13 @@ func (a *AnswerAPIRouter) RegisterUnAuthAnswerAPIRouter(r *gin.RouterGroup) {
 	r.GET("/badge/user/awards/recent", a.badgeController.GetRecentBadgeAwardListByUsername)
 	r.GET("/badge/user/awards", a.badgeController.GetAllBadgeAwardListByUsername)
 	r.GET("/badges", a.badgeController.GetBadgeList)
+
+	// inspirations
+	r.GET("/inspirations", a.inspirationController.List)
+	r.GET("/inspirations/ranking/authors", a.inspirationController.AuthorRanking)
+	r.GET("/inspirations/taxonomy", a.inspirationController.Taxonomy)
+	r.GET("/inspirations/:id", a.inspirationController.Get)
+	r.GET("/inspirations/:id/comments", a.inspirationController.ListComments)
 }
 
 func (a *AnswerAPIRouter) RegisterAuthUserWithAnyStatusAnswerAPIRouter(r *gin.RouterGroup) {
@@ -367,10 +380,24 @@ func (a *AnswerAPIRouter) RegisterAnswerAPIRouter(r *gin.RouterGroup) {
 	r.GET("/review/tasks", a.taskSquareController.ListReviewTasks)
 	r.PUT("/review/task", a.taskSquareController.ReviewTask)
 	r.PUT("/review/task/submission", a.taskSquareController.ReviewSubmission)
+	r.GET("/review/inspirations", a.inspirationController.ListReview)
+	r.PUT("/review/inspiration", a.inspirationController.Review)
 	r.GET("/points/account", a.taskSquareController.GetPointAccount)
 	r.GET("/points/ranking", a.taskSquareController.ListPointRanking)
 	r.GET("/contribution/ranking", a.taskSquareController.ListContributionRanking)
 	r.GET("/points/transactions", a.taskSquareController.ListPointTransactions)
+
+	// inspirations
+	r.POST("/inspirations", a.inspirationController.Create)
+	r.PUT("/inspirations/:id", a.inspirationController.Update)
+	r.DELETE("/inspirations/:id", a.inspirationController.Delete)
+	r.POST("/inspirations/:id/like", a.inspirationController.Like)
+	r.DELETE("/inspirations/:id/like", a.inspirationController.Unlike)
+	r.POST("/inspirations/:id/favorite", a.inspirationController.Favorite)
+	r.DELETE("/inspirations/:id/favorite", a.inspirationController.Unfavorite)
+	r.POST("/inspirations/:id/share", a.inspirationController.Share)
+	r.POST("/inspirations/:id/comments", a.inspirationController.AddComment)
+	r.POST("/inspirations/:id/report", a.inspirationController.Report)
 
 	// AI conversation
 	r.GET("/ai/conversation/page", a.aiConversationController.GetConversationList)
@@ -523,4 +550,14 @@ func (a *AnswerAPIRouter) RegisterAnswerAdminAPIRouter(r *gin.RouterGroup) {
 	r.GET("/featured-posts", a.taskSquareAdminController.ListFeaturedPosts)
 	r.POST("/featured-post", a.taskSquareAdminController.FeaturePost)
 	r.PUT("/featured-post/revoke", a.taskSquareAdminController.RevokeFeaturedPost)
+
+	// inspirations
+	r.GET("/inspirations", a.inspirationAdminController.List)
+	r.PUT("/inspirations/:id/action", a.inspirationAdminController.Action)
+	r.POST("/inspirations/:id/hide", a.inspirationAdminController.Hide)
+	r.POST("/inspirations/:id/restore", a.inspirationAdminController.Restore)
+	r.DELETE("/inspirations/:id", a.inspirationAdminController.Delete)
+	r.POST("/inspirations/:id/ban-author", a.inspirationAdminController.BanAuthor)
+	r.GET("/inspiration-settings", a.inspirationAdminController.GetSetting)
+	r.PUT("/inspiration-settings", a.inspirationAdminController.SaveSetting)
 }

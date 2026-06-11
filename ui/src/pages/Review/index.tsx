@@ -23,7 +23,11 @@ import { useSearchParams } from 'react-router-dom';
 
 import { usePageTags } from '@/hooks';
 import { Empty } from '@/components';
-import { getReviewTasks, getReviewType } from '@/services';
+import {
+  getReviewInspirations,
+  getReviewTasks,
+  getReviewType,
+} from '@/services';
 import type * as Type from '@/common/interface';
 
 import {
@@ -32,6 +36,7 @@ import {
   SuggestContent,
   QueuedContent,
   TaskContent,
+  InspirationContent,
 } from './components';
 import './index.scss';
 
@@ -39,6 +44,8 @@ const reviewTypeOrder = [
   'task_request',
   'task_in_progress',
   'task_submission',
+  'inspiration',
+  'inspiration_report',
   'queued_post',
   'flagged_post',
   'suggested_post_edit',
@@ -48,6 +55,8 @@ const reviewTypeLabels: Record<string, string> = {
   task_request: '待审核需求',
   task_in_progress: '进行中需求',
   task_submission: '待验收任务',
+  inspiration: '灵感审核',
+  inspiration_report: '灵感举报',
   queued_post: '排队内容',
   flagged_post: '举报内容',
   suggested_post_edit: '建议编辑',
@@ -68,11 +77,23 @@ const Index: FC = () => {
         taskRequestResult,
         taskInProgressResult,
         taskSubmissionResult,
+        inspirationReviewResult,
+        inspirationReportResult,
       ] = await Promise.allSettled([
         getReviewType(),
         getReviewTasks({ page: 1, page_size: 1, status: 'pending_review' }),
         getReviewTasks({ page: 1, page_size: 1, status: 'in_progress' }),
         getReviewTasks({ page: 1, page_size: 1, status: 'submitted' }),
+        getReviewInspirations({
+          page: 1,
+          page_size: 1,
+          status: 'pending_review',
+        }),
+        getReviewInspirations({
+          page: 1,
+          page_size: 1,
+          status: 'reported',
+        }),
       ]);
       const legacyReviewTypes =
         legacyReviewResult.status === 'fulfilled'
@@ -80,15 +101,23 @@ const Index: FC = () => {
           : [];
       const taskRequestCount =
         taskRequestResult.status === 'fulfilled'
-          ? taskRequestResult.value.count
+          ? taskRequestResult.value?.count || 0
           : 0;
       const taskInProgressCount =
         taskInProgressResult.status === 'fulfilled'
-          ? taskInProgressResult.value.count
+          ? taskInProgressResult.value?.count || 0
           : 0;
       const taskSubmissionCount =
         taskSubmissionResult.status === 'fulfilled'
-          ? taskSubmissionResult.value.count
+          ? taskSubmissionResult.value?.count || 0
+          : 0;
+      const inspirationReviewCount =
+        inspirationReviewResult.status === 'fulfilled'
+          ? inspirationReviewResult.value?.count || 0
+          : 0;
+      const inspirationReportCount =
+        inspirationReportResult.status === 'fulfilled'
+          ? inspirationReportResult.value?.count || 0
           : 0;
       const legacyAmountByName = new Map(
         legacyReviewTypes.map((item) => [item.name, item.todo_amount]),
@@ -103,7 +132,11 @@ const Index: FC = () => {
               ? taskInProgressCount
               : name === 'task_submission'
                 ? taskSubmissionCount
-                : legacyAmountByName.get(name) || 0,
+                : name === 'inspiration'
+                  ? inspirationReviewCount
+                  : name === 'inspiration_report'
+                    ? inspirationReportCount
+                    : legacyAmountByName.get(name) || 0,
       }));
       const nextType = searchType
         ? nextReviewTypes.find((item) => item.name === searchType)?.name
@@ -171,6 +204,20 @@ const Index: FC = () => {
         {currentReviewType === 'task_submission' && (
           <TaskContent
             status="submitted"
+            refreshCount={() => fetchReviewType(false)}
+          />
+        )}
+
+        {currentReviewType === 'inspiration' && (
+          <InspirationContent
+            status="pending_review"
+            refreshCount={() => fetchReviewType(false)}
+          />
+        )}
+
+        {currentReviewType === 'inspiration_report' && (
+          <InspirationContent
+            status="reported"
             refreshCount={() => fetchReviewType(false)}
           />
         )}
