@@ -23,6 +23,7 @@ data:
     driver: "sqlite3"
     connection: "/data/sqlite3/answer.db"
   cache:
+    type: "file"
     file_path: "/data/cache/cache.db"
 i18n:
   bundle_dir: "/data/i18n"
@@ -41,4 +42,3 @@ ui:
   api_url: '/'
   base_url: ''
   api_base_url: ''
-

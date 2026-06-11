@@ -21,6 +21,7 @@ package data
 
 import (
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/apache/answer/pkg/dir"
@@ -96,6 +97,10 @@ func NewDB(debug bool, dataConf *Database) (*xorm.Engine, error) {
 
 // NewCache new cache instance
 func NewCache(c *CacheConf) (cache.Cache, func(), error) {
+	if c == nil {
+		c = &CacheConf{}
+	}
+
 	var pluginCache plugin.Cache
 	_ = plugin.CallCache(func(fn plugin.Cache) error {
 		pluginCache = fn
@@ -105,7 +110,11 @@ func NewCache(c *CacheConf) (cache.Cache, func(), error) {
 		return pluginCache, func() {}, nil
 	}
 
-	// TODO What cache type should be initialized according to the configuration file
+	if strings.EqualFold(c.Type, "redis") {
+		log.Infof("try to connect redis cache at %s", c.Addr)
+		return NewRedisCache(c)
+	}
+
 	memCache := memory.NewCache()
 
 	if len(c.FilePath) > 0 {

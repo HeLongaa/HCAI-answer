@@ -145,6 +145,7 @@ data:
     driver: "sqlite3"
     connection: "/var/lib/hcai-answer/sqlite3/answer.db"
   cache:
+    type: "file"
     file_path: "/var/lib/hcai-answer/cache/cache.db"
 i18n:
   bundle_dir: "/var/lib/hcai-answer/i18n"
@@ -153,6 +154,16 @@ service_config:
 ```
 
 正式环境也可以在安装流程中选择 MySQL 或 PostgreSQL。
+
+如果正式环境使用 Redis 缓存，可以将缓存配置改为：
+
+```yaml
+data:
+  cache:
+    type: "redis"
+    url: "redis://:password@127.0.0.1:6379/0"
+    key_prefix: "hcai-answer:"
+```
 
 ### 3. 配置 systemd
 

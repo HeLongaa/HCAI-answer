@@ -30,5 +30,12 @@ type Database struct {
 
 // CacheConf cache
 type CacheConf struct {
-	FilePath string `json:"file_path" mapstructure:"file_path" yaml:"file_path"`
+	Type      string `json:"type" mapstructure:"type" yaml:"type,omitempty"`
+	FilePath  string `json:"file_path" mapstructure:"file_path" yaml:"file_path,omitempty"`
+	URL       string `json:"url" mapstructure:"url" yaml:"url,omitempty"`
+	Addr      string `json:"addr" mapstructure:"addr" yaml:"addr,omitempty"`
+	Username  string `json:"username" mapstructure:"username" yaml:"username,omitempty"`
+	Password  string `json:"password" mapstructure:"password" yaml:"password,omitempty"`
+	DB        int    `json:"db" mapstructure:"db" yaml:"db,omitempty"`
+	KeyPrefix string `json:"key_prefix" mapstructure:"key_prefix" yaml:"key_prefix,omitempty"`
 }
