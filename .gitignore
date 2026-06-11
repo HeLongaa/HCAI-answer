@@ -32,6 +32,7 @@ vendor/
 build/tools/
 build/release/
 dist/
+deploy-package/
 
 # Lint setup generated file
 .husky/

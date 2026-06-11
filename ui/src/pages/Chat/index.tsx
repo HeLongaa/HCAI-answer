@@ -1826,13 +1826,18 @@ const Chat: FC = () => {
                             modelReasoningEfforts[model.site_model_id] || '';
                           const reasoningMenuShown =
                             reasoningMenuModelID === model.site_model_id;
+                          const optionClassNames = [
+                            'hcai-model-option',
+                            model.site_model_id === selectedModelID
+                              ? 'active'
+                              : '',
+                            reasoningMenuShown ? 'reasoning-open' : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' ');
                           return (
                             <div
-                              className={
-                                model.site_model_id === selectedModelID
-                                  ? 'hcai-model-option active'
-                                  : 'hcai-model-option'
-                              }
+                              className={optionClassNames}
                               key={model.site_model_id}>
                               <button
                                 type="button"

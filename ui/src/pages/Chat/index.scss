@@ -1333,12 +1333,19 @@
 }
 
 .hcai-model-option {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   padding: 3px 4px 3px 6px;
   border: 1px solid transparent;
   border-radius: 11px;
+}
+
+.hcai-model-option.reasoning-open {
+  position: relative;
+  z-index: 3;
+  margin-bottom: 58px;
 }
 
 .hcai-model-option.active {
@@ -1425,32 +1432,36 @@
 
 .hcai-model-reasoning-popover {
   position: absolute;
+  top: calc(100% + 8px);
   right: 0;
-  bottom: calc(100% + 6px);
-  z-index: 2;
-  display: grid;
-  gap: 2px;
-  width: 96px;
-  padding: 5px;
+  z-index: 4;
+  display: flex;
+  gap: 7px;
+  min-width: 268px;
+  padding: 8px;
   border: 1px solid var(--an-glass-border);
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--an-glass-surface-strong);
-  box-shadow: var(--an-glass-shadow), var(--an-glass-inner-shadow);
+  box-shadow:
+    0 18px 42px rgba(18, 32, 54, 0.16),
+    var(--an-glass-inner-shadow);
   backdrop-filter: blur(var(--an-glass-blur)) saturate(1.45);
   -webkit-backdrop-filter: blur(var(--an-glass-blur)) saturate(1.45);
 }
 
 .hcai-model-reasoning-popover button {
-  width: 100%;
-  height: 30px;
-  padding: 0 10px;
+  flex: 1 1 0;
+  min-width: 54px;
+  height: 36px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 12px;
   color: #66758a;
   background: transparent;
-  font-size: 0.8rem;
-  font-weight: 700;
-  text-align: left;
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .hcai-model-reasoning-popover button:hover {
