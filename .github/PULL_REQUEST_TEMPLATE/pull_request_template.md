@@ -11,7 +11,7 @@ Fixes #
   - [ ] Backend tests: `make test`
   - [ ] Frontend typecheck/lint/test/build: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`
   - [ ] Migration tests or manual migration verification, if database schema/data changes are included
-  - [ ] Helm/Docker verification, if deployment files or release packaging changed
+  - [ ] Helm or deployment verification, if deployment files or release packaging changed
 
 ## Release Risk
 

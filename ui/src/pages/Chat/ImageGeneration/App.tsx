@@ -10,7 +10,6 @@ import {
   getCustomProviderConfigUrl,
   loadCustomProviderSettingsFromUrl,
 } from './lib/customProviderConfigUrl';
-import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice';
 import Header from './components/Header';
 import PlaygroundTopbar from './components/PlaygroundTopbar';
 import TaskGrid from './components/TaskGrid';
@@ -72,7 +71,6 @@ export default function App({ embedded = false }: AppProps) {
   const activeFavoriteCollectionId = useStore(
     (s) => s.activeFavoriteCollectionId,
   );
-  useDockerApiUrlMigrationNotice();
   useGlobalClickSuppression();
 
   useEffect(() => {

@@ -3027,7 +3027,7 @@ function getApiRequestNetworkErrorHint(
       profile?.provider === 'openai'
         ? `\n· API 不支持 ${getApiModeApiName(profile.apiMode)}`
         : '';
-    return `提示：请求立即失败，可能原因：\n· API 服务器不可达或地址有误，请检查 API URL 是否正确、服务是否正常运行${unsupportedApiHint}\n· 接口不支持浏览器跨域请求，可使用 Docker 部署版或本地运行版并配置 API 代理解决`;
+    return `提示：请求立即失败，可能原因：\n· API 服务器不可达或地址有误，请检查 API URL 是否正确、服务是否正常运行${unsupportedApiHint}\n· 接口不支持浏览器跨域请求，可使用本地运行版并配置 API 代理解决`;
   }
 
   if (elapsedSeconds >= 55 && elapsedSeconds <= 75) {

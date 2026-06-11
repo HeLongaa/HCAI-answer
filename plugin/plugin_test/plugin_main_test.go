@@ -21,17 +21,13 @@ package plugin_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/apache/answer/internal/base/data"
 	"github.com/apache/answer/internal/migrations"
-	"github.com/ory/dockertest/v3"
-	"github.com/ory/dockertest/v3/docker"
 	"github.com/segmentfault/pacman/cache"
 	"github.com/segmentfault/pacman/log"
 	"xorm.io/xorm"
@@ -40,20 +36,10 @@ import (
 
 var (
 	mysqlDBSetting = TestDBSetting{
-		Driver:       string(schemas.MYSQL),
-		ImageName:    "mariadb",
-		ImageVersion: "10.4.7",
-		ENV:          []string{"MYSQL_ROOT_PASSWORD=root", "MYSQL_DATABASE=answer", "MYSQL_ROOT_HOST=%"},
-		PortID:       "3306/tcp",
-		Connection:   "root:root@(localhost:%s)/answer?parseTime=true", // port is not fixed, it will be got by port id
+		Driver: string(schemas.MYSQL),
 	}
 	postgresDBSetting = TestDBSetting{
-		Driver:       string(schemas.POSTGRES),
-		ImageName:    "postgres",
-		ImageVersion: "14",
-		ENV:          []string{"POSTGRES_USER=root", "POSTGRES_PASSWORD=root", "POSTGRES_DB=answer", "LISTEN_ADDRESSES='*'"},
-		PortID:       "5432/tcp",
-		Connection:   "host=localhost port=%s user=root password=root dbname=answer sslmode=disable",
+		Driver: string(schemas.POSTGRES),
 	}
 	sqlite3DBSetting = TestDBSetting{
 		Driver:     string(schemas.SQLITE),
@@ -104,12 +90,8 @@ func TestMain(t *testing.M) {
 }
 
 type TestDBSetting struct {
-	Driver       string
-	ImageName    string
-	ImageVersion string
-	ENV          []string
-	PortID       string
-	Connection   string
+	Driver     string
+	Connection string
 }
 
 func initTestDataSource(dbSetting TestDBSetting) error {
@@ -146,7 +128,6 @@ func initTestDataSource(dbSetting TestDBSetting) error {
 }
 
 func initDatabaseImage(dbSetting TestDBSetting) (connection string, cleanup func(), err error) {
-	// sqlite3 don't need to set up image
 	if dbSetting.Driver == string(schemas.SQLITE) {
 		return dbSetting.Connection, func() {
 			log.Info("remove database", dbSetting.Connection)
@@ -156,36 +137,10 @@ func initDatabaseImage(dbSetting TestDBSetting) (connection string, cleanup func
 			}
 		}, nil
 	}
-	pool, err := dockertest.NewPool("")
-	pool.MaxWait = time.Minute * 5
-	if err != nil {
-		return "", nil, fmt.Errorf("could not connect to docker: %s", err)
+	if os.Getenv("TEST_DB_CONNECTION") == "" {
+		return "", nil, fmt.Errorf("TEST_DB_CONNECTION is required for %s tests", dbSetting.Driver)
 	}
-
-	// resource, err := pool.Run(dbSetting.ImageName, dbSetting.ImageVersion, dbSetting.ENV)
-	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
-		Repository: dbSetting.ImageName,
-		Tag:        dbSetting.ImageVersion,
-		Env:        dbSetting.ENV,
-	}, func(config *docker.HostConfig) {
-		config.AutoRemove = true
-		config.RestartPolicy = docker.RestartPolicy{Name: "no"}
-	})
-	if err != nil {
-		return "", nil, fmt.Errorf("could not pull resource: %s", err)
-	}
-
-	connection = fmt.Sprintf(dbSetting.Connection, resource.GetPort(dbSetting.PortID))
-	if err := pool.Retry(func() error {
-		db, err := sql.Open(dbSetting.Driver, connection)
-		if err != nil {
-			return err
-		}
-		return db.Ping()
-	}); err != nil {
-		return "", nil, fmt.Errorf("could not connect to database: %s", err)
-	}
-	return connection, func() { _ = pool.Purge(resource) }, nil
+	return os.Getenv("TEST_DB_CONNECTION"), func() {}, nil
 }
 
 func initDatabase(dbSetting TestDBSetting) (dbEngine *xorm.Engine, err error) {

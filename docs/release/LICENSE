@@ -218,7 +218,6 @@ The following components are provided under the Apache 2.0 License.
    (Apache License, Version 2.0) golang-mock (https://github.com/golang/mock) [link](./licenses/LICENSE-golang-mock.txt)
    (Apache License, Version 2.0) google-wire (https://github.com/google/wire) [link](./licenses/LICENSE-google-wire.txt)
    (Apache License, Version 2.0) mojocn-base64Captcha (https://github.com/mojocn/base64Captcha) [link](./licenses/LICENSE-mojocn-base64Captcha.txt)
-   (Apache License, Version 2.0) ory-dockertest (https://github.com/ory/dockertest) [link](./licenses/LICENSE-ory-dockertest.txt)
    (Apache License, Version 2.0) spf13-cobra (https://github.com/spf13/cobra) [link](./licenses/LICENSE-spf13-cobra.txt)
 
 ========================================================================

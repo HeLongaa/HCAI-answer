@@ -220,22 +220,6 @@ sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d your-domain.com
 ```
 
-## Docker 部署
-
-如果服务器支持 Docker，可以构建自定义镜像：
-
-```bash
-docker build -t hcai-answer:latest .
-docker run -d \
-  --name hcai-answer \
-  -p 9080:80 \
-  -v hcai-answer-data:/data \
-  --restart unless-stopped \
-  hcai-answer:latest
-```
-
-注意：直接使用官方 `apache/answer` 镜像不会包含本仓库的二次开发功能。
-
 ## 更新发布
 
 直接部署方式：
@@ -265,7 +249,7 @@ sudo tar czf hcai-answer-data-$(date +%F).tar.gz /var/lib/hcai-answer
 
 ## 数据目录
 
-默认 Docker 数据目录是 `/data`，直接部署推荐使用 `/var/lib/hcai-answer`。其中通常包含：
+直接部署推荐使用 `/var/lib/hcai-answer` 作为数据目录。其中通常包含：
 
 - `conf/config.yaml`：应用配置
 - `sqlite3/answer.db`：SQLite 数据库
