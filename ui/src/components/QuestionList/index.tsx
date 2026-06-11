@@ -178,22 +178,24 @@ const QuestionList: FC<Props> = ({
 
   return (
     <div>
-      <div className="mb-3 d-flex flex-wrap justify-content-between">
-        <h5 className="fs-5 text-nowrap mb-3 mb-md-0">
+      <div className="question-list-header mb-3 d-flex flex-wrap justify-content-between">
+        <h5 className="question-list-heading fs-5 text-nowrap mb-3 mb-md-0">
           {source === 'questions'
             ? t('all_questions')
             : source === 'linked'
               ? t('x_posts', { count })
               : t('x_questions', { count })}
         </h5>
-        <div className="d-flex flex-wrap align-items-center gap-2">
-          <QueryGroup
-            data={orderKeys}
-            currentSort={curOrder}
-            pathname={source === 'questions' ? '/questions' : ''}
-            i18nKeyPrefix="question"
-            maxBtnCount={source === 'tag' ? 3 : 4}
-          />
+        <div className="question-list-actions d-flex flex-wrap align-items-center gap-2">
+          <div className="question-list-sort">
+            <QueryGroup
+              data={orderKeys}
+              currentSort={curOrder}
+              pathname={source === 'questions' ? '/questions' : ''}
+              i18nKeyPrefix="question"
+              maxBtnCount={source === 'tag' ? 3 : 4}
+            />
+          </div>
           {source === 'questions' ? (
             <Button
               as={NavLink as any}
