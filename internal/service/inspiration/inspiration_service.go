@@ -95,6 +95,14 @@ func isConfiguredInspirationCategory(category string, categories []string) bool 
 	return false
 }
 
+func inspirationBigIntString(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "0"
+	}
+	return value
+}
+
 func (s *InspirationService) Create(ctx context.Context, req *schema.InspirationCreateReq) (*schema.InspirationResp, error) {
 	setting, err := s.GetSetting(ctx)
 	if err != nil {
@@ -111,7 +119,8 @@ func (s *InspirationService) Create(ctx context.Context, req *schema.Inspiration
 		publishedAt = time.Now()
 	}
 	item := &entity.Inspiration{
-		UserID:      req.UserID,
+		UserID:      inspirationBigIntString(req.UserID),
+		ReviewerID:  "0",
 		Title:       req.Title,
 		Summary:     req.Summary,
 		Content:     req.Content,
@@ -127,6 +136,7 @@ func (s *InspirationService) Create(ctx context.Context, req *schema.Inspiration
 		IsPublic:    req.IsPublic,
 		Status:      status,
 		PublishedAt: publishedAt,
+		DeletedBy:   "0",
 	}
 	if _, err = s.data.DB.Context(ctx).Insert(item); err != nil {
 		return nil, err
@@ -320,6 +330,7 @@ func (s *InspirationService) Delete(ctx context.Context, id int, userID string, 
 }
 
 func (s *InspirationService) Like(ctx context.Context, id int, userID string, active bool) error {
+	userID = inspirationBigIntString(userID)
 	item, err := s.getEntity(ctx, id)
 	if err != nil {
 		return err
@@ -355,6 +366,7 @@ func (s *InspirationService) Like(ctx context.Context, id int, userID string, ac
 }
 
 func (s *InspirationService) Favorite(ctx context.Context, id int, userID string, active bool) error {
+	userID = inspirationBigIntString(userID)
 	item, err := s.getEntity(ctx, id)
 	if err != nil {
 		return err
@@ -390,6 +402,7 @@ func (s *InspirationService) Favorite(ctx context.Context, id int, userID string
 }
 
 func (s *InspirationService) Share(ctx context.Context, id int, userID string) error {
+	userID = inspirationBigIntString(userID)
 	item, err := s.getEntity(ctx, id)
 	if err != nil {
 		return err
@@ -403,6 +416,7 @@ func (s *InspirationService) Share(ctx context.Context, id int, userID string) e
 }
 
 func (s *InspirationService) AddComment(ctx context.Context, req *schema.InspirationCommentCreateReq) (*schema.InspirationCommentResp, error) {
+	req.UserID = inspirationBigIntString(req.UserID)
 	item, err := s.getEntity(ctx, req.ID)
 	if err != nil {
 		return nil, err
@@ -448,6 +462,7 @@ func (s *InspirationService) ListComments(ctx context.Context, req *schema.Inspi
 }
 
 func (s *InspirationService) Report(ctx context.Context, req *schema.InspirationReportReq) error {
+	req.UserID = inspirationBigIntString(req.UserID)
 	item, err := s.getEntity(ctx, req.ID)
 	if err != nil {
 		return err
@@ -455,7 +470,14 @@ func (s *InspirationService) Report(ctx context.Context, req *schema.Inspiration
 	if !s.canView(item, req.UserID, false) {
 		return errors.Forbidden(reason.ForbiddenError)
 	}
-	report := &entity.InspirationReport{InspirationID: req.ID, UserID: req.UserID, Reason: req.Reason, Content: req.Content, Status: entity.InspirationReportStatusPending}
+	report := &entity.InspirationReport{
+		InspirationID: req.ID,
+		UserID:        req.UserID,
+		Reason:        req.Reason,
+		Content:       req.Content,
+		Status:        entity.InspirationReportStatusPending,
+		OperatorID:    "0",
+	}
 	if _, err = s.data.DB.Context(ctx).Insert(report); err != nil {
 		return err
 	}
@@ -799,7 +821,7 @@ func (s *InspirationService) recordView(ctx context.Context, item *entity.Inspir
 	windowKey := time.Now().Format("2006010215")
 	_, err := s.data.DB.Context(ctx).Insert(&entity.InspirationViewLog{
 		InspirationID: item.ID,
-		UserID:        userID,
+		UserID:        inspirationBigIntString(userID),
 		IP:            ip,
 		WindowKey:     windowKey,
 	})
@@ -815,6 +837,7 @@ func (s *InspirationService) adminUpdateStatus(ctx context.Context, item *entity
 	if err := session.Begin(); err != nil {
 		return err
 	}
+	operatorID = inspirationBigIntString(operatorID)
 	update := &entity.Inspiration{Status: status, ReviewComment: reviewComment, ReviewerID: operatorID}
 	cols := []string{"status", "review_comment", "reviewer_id"}
 	if status == entity.InspirationStatusPublished && item.PublishedAt.IsZero() {
@@ -903,6 +926,7 @@ func (s *InspirationService) revokePublishReward(ctx context.Context, session *x
 }
 
 func (s *InspirationService) addPointsWithSession(ctx context.Context, session *xorm.Session, userID, sourceType, sourceID string, delta int, description, operatorID string) error {
+	userID = inspirationBigIntString(userID)
 	if delta == 0 {
 		return nil
 	}
@@ -952,7 +976,7 @@ func (s *InspirationService) addPointsWithSession(ctx context.Context, session *
 	}
 	_, err = session.Insert(&entity.PointTransaction{
 		UserID: userID, SourceType: sourceType, SourceID: sourceID, Delta: delta,
-		Balance: updated.Balance, Description: description, OperatorID: operatorID,
+		Balance: updated.Balance, Description: description, OperatorID: inspirationBigIntString(operatorID),
 	})
 	if isInspirationDuplicateKeyError(err) {
 		return nil

@@ -4,7 +4,6 @@ import {
   FormEvent,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
 import { Button, Form } from 'react-bootstrap';
@@ -52,7 +51,6 @@ const NewInspiration: FC = () => {
   const [isPublic, setIsPublic] = useState(true);
   const [loading, setLoading] = useState(false);
   const [coverUploading, setCoverUploading] = useState(false);
-  const formRef = useRef<HTMLFormElement>(null);
   const isEdit = Boolean(id);
   const categoryOptions = useMemo(() => {
     const items = (taxonomy?.categories || []).map((item) => item.name);
@@ -157,6 +155,7 @@ const NewInspiration: FC = () => {
   return (
     <main className="inspiration-page">
       <header className="inspiration-head inspiration-form-head">
+        <InspirationBackButton inline onClick={goBack} />
         <div>
           <span className="inspiration-kicker">
             {isEdit ? 'Edit Inspiration' : 'New Inspiration'}
@@ -169,12 +168,7 @@ const NewInspiration: FC = () => {
           </p>
         </div>
       </header>
-      <Form className="inspiration-form" ref={formRef} onSubmit={handleSubmit}>
-        <InspirationBackButton
-          anchorRef={formRef}
-          topOffset={-500}
-          onClick={goBack}
-        />
+      <Form className="inspiration-form" onSubmit={handleSubmit}>
         <Form.Group className="mb-3">
           <Form.Label>标题</Form.Label>
           <Form.Control

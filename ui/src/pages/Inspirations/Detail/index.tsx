@@ -20,6 +20,7 @@ import {
 } from '@/services';
 import { toastStore } from '@/stores';
 import { usePageTags } from '@/hooks';
+import { savePendingImagePrompt } from '@/pages/Chat/ImageGeneration/pendingPrompt';
 import InspirationBackButton from '../BackButton';
 
 import '../index.scss';
@@ -50,6 +51,21 @@ const copyText = async (text: string) => {
     textarea.remove();
     return copied;
   }
+};
+
+const isImageGenerationInspiration = (data: {
+  category?: string;
+  tags?: string[];
+  type?: string;
+}) => {
+  const values = [data.type, data.category, ...(data.tags || [])]
+    .filter(Boolean)
+    .map((item) => String(item).toLowerCase());
+  return values.some((item) =>
+    ['图片生成', '生图', '文生图', 'image', 'image generation'].some(
+      (keyword) => item.includes(keyword),
+    ),
+  );
 };
 
 const InspirationDetail: FC = () => {
@@ -148,6 +164,25 @@ const InspirationDetail: FC = () => {
     }
   };
 
+  const copyPrompt = async () => {
+    if (!data?.prompt) {
+      return;
+    }
+    const copied = await copyText(data.prompt);
+    toastStore.getState().show({
+      msg: copied ? '提示词已复制' : '复制失败，请手动复制',
+      variant: copied ? 'success' : 'warning',
+    });
+  };
+
+  const usePromptForImage = () => {
+    if (!data?.prompt) {
+      return;
+    }
+    savePendingImagePrompt(data.prompt);
+    navigate('/?workspace=image');
+  };
+
   const submitComment = async () => {
     if (!comment.trim() || !Number.isFinite(numericID)) {
       return;
@@ -211,7 +246,12 @@ const InspirationDetail: FC = () => {
     <main className="inspiration-page">
       <div className="inspiration-detail-layout">
         <article className="inspiration-detail" ref={detailRef}>
-          <InspirationBackButton anchorRef={detailRef} onClick={goBack} />
+          <InspirationBackButton
+            anchorRef={detailRef}
+            leftOffset={32}
+            topOffset={32}
+            onClick={goBack}
+          />
           {data.cover_url ? (
             <div className="inspiration-detail-cover">
               <img src={data.cover_url} alt={data.title} />
@@ -287,7 +327,29 @@ const InspirationDetail: FC = () => {
 
           {data.prompt ? (
             <section className="inspiration-detail-section">
-              <h2>提示词</h2>
+              <div className="inspiration-section-heading">
+                <h2>提示词</h2>
+                <div className="inspiration-prompt-actions">
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline-secondary"
+                    aria-label="复制提示词"
+                    title="复制提示词"
+                    onClick={copyPrompt}>
+                    <i className="bi bi-copy" />
+                  </Button>
+                  {isImageGenerationInspiration(data) ? (
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="primary"
+                      onClick={usePromptForImage}>
+                      一键使用
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
               <div className="inspiration-prompt">{data.prompt}</div>
             </section>
           ) : null}

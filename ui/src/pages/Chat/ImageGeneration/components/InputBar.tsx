@@ -3306,7 +3306,7 @@ export default function InputBar() {
                 appMode === 'gallery' ? 'grid-cols-7' : 'grid-cols-6',
               )}
 
-              <div className="flex gap-2 flex-shrink-0 mb-0.5">
+              <div className="flex gap-2 flex-shrink-0 mb-0.5 hcai-image-action-buttons">
                 <div
                   className="relative"
                   onMouseEnter={() => setAttachHover(true)}
@@ -3319,7 +3319,7 @@ export default function InputBar() {
                     onClick={() =>
                       !atImageLimit && fileInputRef.current?.click()
                     }
-                    className={`p-2.5 rounded-xl transition-all shadow-sm ${
+                    className={`hcai-image-action-icon p-2.5 rounded-xl transition-all shadow-sm ${
                       atImageLimit
                         ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
                         : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow'
@@ -3369,7 +3369,7 @@ export default function InputBar() {
                           ? !canSubmit
                           : false
                     }
-                    className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
+                    className={`hcai-image-action-icon p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
                       activeAgentIsRunning
                         ? 'bg-red-500 text-white hover:bg-red-600'
                         : !hasSubmitApiConfig
@@ -3394,7 +3394,7 @@ export default function InputBar() {
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth={2}
-                          d="M13 7l5 5m0 0l-5 5m5-5H6"
+                          d="M12 19V5m0 0l-6 6m6-6l6 6"
                         />
                       </svg>
                     )}
@@ -3557,7 +3557,7 @@ export default function InputBar() {
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth={2}
-                          d="M13 7l5 5m0 0l-5 5m5-5H6"
+                          d="M12 19V5m0 0l-6 6m6-6l6 6"
                         />
                       </svg>
                     )}

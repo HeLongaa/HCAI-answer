@@ -144,6 +144,7 @@ const falRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const customRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const openAIWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const agentRoundControllers = new Map<string, AbortController>();
+const hiddenSystemGenerationIds = new Set<string>();
 let systemImageModelsLoadPromise: Promise<void> | null = null;
 let agentConversationPersistenceReady = false;
 let agentConversationMigrationPending = false;
@@ -1987,7 +1988,12 @@ export const useStore = create<AppState>()(
           const generations = (await getAiImageGenerations()) || [];
 
           const historyTasks = await Promise.all(
-            generations.map(mapSystemImageGenerationToTask),
+            generations
+              .filter(
+                (generation) =>
+                  !hiddenSystemGenerationIds.has(generation.generation_id),
+              )
+              .map(mapSystemImageGenerationToTask),
           );
           const historyTaskIds = new Set(
             historyTasks.map(getHistoryTaskMergeKey),
@@ -3064,6 +3070,16 @@ function getRawErrorPayload(
   };
 }
 
+function getTaskErrorMessage(err: unknown, fallback = '生成失败'): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object' && 'msg' in err) {
+    const msg = (err as { msg?: unknown }).msg;
+    if (typeof msg === 'string' && msg.trim()) return msg;
+  }
+  if (typeof err === 'string' && err.trim()) return err;
+  return fallback;
+}
+
 function clearFalRecoveryTimer(taskId: string) {
   const timer = falRecoveryTimers.get(taskId);
   if (timer) clearTimeout(timer);
@@ -3624,6 +3640,7 @@ export async function initStore() {
         : {}),
     });
   }
+
 }
 
 /** 提交新任务 */
@@ -4463,7 +4480,15 @@ async function generateAiImageStream(
     body: JSON.stringify(params),
   });
   if (!response.ok) {
-    throw new Error(`流式生成请求失败：${response.status}`);
+    let message = `流式生成请求失败：${response.status}`;
+    try {
+      const payload = await response.clone().json();
+      const msg = typeof payload?.msg === 'string' ? payload.msg.trim() : '';
+      if (msg) message = msg;
+    } catch {
+      // keep the status fallback when the error payload is not JSON
+    }
+    throw new Error(message);
   }
   if (!response.body) throw new Error('接口未返回可读取的流式响应');
 
@@ -4956,7 +4981,7 @@ async function executeSystemImageTask(taskId: string) {
 
     updateTaskInStore(taskId, {
       status: 'error',
-      error: err instanceof Error ? err.message : String(err),
+      error: getTaskErrorMessage(err),
       ...getRawErrorPayload(err),
       falRecoverable: false,
       customRecoverable: false,
@@ -6997,7 +7022,7 @@ async function executeTask(taskId: string) {
       });
       scheduleCustomRecovery(taskId);
     } else {
-      let errorMessage = err instanceof Error ? err.message : String(err);
+      let errorMessage = getTaskErrorMessage(err);
       const settings = useStore.getState().settings;
       const profile = getTaskApiProfile(settings, latestTask);
       const usesApiProxy = profile?.apiProxy ?? settings.apiProxy;
@@ -7334,23 +7359,58 @@ export async function deleteFavoriteCollection(
     .showToast(`已删除收藏夹「${collection.name}」`, 'success');
 }
 
-/** 重试失败的任务：创建新任务并执行 */
+/** 重试失败的任务：创建新任务并替换原失败任务 */
 export async function retryTask(task: TaskRecord) {
   const { settings } = useStore.getState();
-  const activeProfile = getActiveApiProfile(settings);
-  const normalizedParams = normalizeParamsForSettings(task.params, settings, {
-    hasInputImages: task.inputImageIds.length > 0,
-  });
+  const state = useStore.getState();
+  const isGalleryTask = !isAgentTask(task);
+  const systemModel = isGalleryTask
+    ? state.systemImageModels.find(
+        (model) => model.site_model_id === task.apiModel,
+      ) || null
+    : null;
+  const taskProfile = isGalleryTask ? null : getTaskApiProfile(settings, task);
+  const fallbackProfile =
+    !isGalleryTask && !task.apiProfileId ? getActiveApiProfile(settings) : null;
+  const profileForParams = taskProfile ?? fallbackProfile;
+  const paramsSettings = profileForParams
+    ? createSettingsForApiProfile(settings, profileForParams)
+    : settings;
+  const normalizedParams = normalizeParamsForSystemImageModel(
+    normalizeParamsForSettings(task.params, paramsSettings, {
+      hasInputImages: task.inputImageIds.length > 0,
+    }),
+    systemModel,
+  );
   const taskId = genId();
+  const apiProvider = isGalleryTask
+    ? task.apiProvider || systemModel?.provider_name || 'system'
+    : task.apiProvider || profileForParams?.provider || '';
+  const apiProfileId = isGalleryTask
+    ? ''
+    : task.apiProfileId || profileForParams?.id || '';
+  const apiProfileName = isGalleryTask
+    ? task.apiProfileName ||
+      systemModel?.display_name ||
+      task.apiModel ||
+      '系统图片模型'
+    : task.apiProfileName || profileForParams?.name || task.apiModel || '未知配置';
+  const apiMode = isGalleryTask
+    ? task.apiMode || systemModel?.api_mode || 'images'
+    : task.apiMode || profileForParams?.apiMode || 'images';
+  const apiModel = isGalleryTask
+    ? task.apiModel || systemModel?.site_model_id || ''
+    : task.apiModel || profileForParams?.model || '';
   const newTask: TaskRecord = {
     id: taskId,
     prompt: task.prompt,
     params: normalizedParams,
-    apiProvider: activeProfile.provider,
-    apiProfileId: activeProfile.id,
-    apiProfileName: activeProfile.name,
-    apiMode: activeProfile.apiMode,
-    apiModel: activeProfile.model,
+    apiProvider,
+    apiProfileId,
+    apiProfileName,
+    apiMode,
+    apiModel,
+    streamPartialImages: task.streamPartialImages,
     inputImageIds: [...task.inputImageIds],
     maskTargetImageId: task.maskTargetImageId ?? null,
     maskImageId: task.maskImageId ?? null,
@@ -7360,10 +7420,43 @@ export async function retryTask(task: TaskRecord) {
     createdAt: Date.now(),
     finishedAt: null,
     elapsed: null,
+    isFavorite: task.isFavorite,
+    favoriteCollectionIds: task.favoriteCollectionIds
+      ? [...task.favoriteCollectionIds]
+      : undefined,
+    sourceMode: isGalleryTask ? 'gallery' : task.sourceMode,
+    agentConversationId: task.agentConversationId,
+    agentRoundId: task.agentRoundId,
+    agentMessageId: task.agentMessageId,
+    agentToolCallId: task.agentToolCallId,
+    agentBatchCallId: task.agentBatchCallId,
+    agentToolAction: task.agentToolAction,
   };
 
   const latestTasks = useStore.getState().tasks;
-  useStore.getState().setTasks([newTask, ...latestTasks]);
+  const taskIndex = latestTasks.findIndex((item) => item.id === task.id);
+  const nextTasks =
+    taskIndex >= 0
+      ? latestTasks.map((item) => (item.id === task.id ? newTask : item))
+      : [newTask, ...latestTasks];
+  useStore.getState().setTasks(nextTasks);
+  if (taskIndex >= 0) {
+    useStore.getState().setSelectedTaskIds((ids) =>
+      ids.map((id) => (id === task.id ? newTask.id : id)),
+    );
+    await dbDeleteTask(task.id);
+  }
+  if ((task.sourceMode ?? 'gallery') === 'gallery') {
+    const generationId = getSystemGenerationIdForDelete(task);
+    if (generationId) hiddenSystemGenerationIds.add(generationId);
+    try {
+      await deleteRemoteImageGenerations([task]);
+    } catch (err) {
+      console.warn('Failed to delete retried image generation', err);
+    } finally {
+      if (generationId) hiddenSystemGenerationIds.delete(generationId);
+    }
+  }
   await putTask(newTask);
 
   executeTask(taskId);

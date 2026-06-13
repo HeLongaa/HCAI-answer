@@ -1743,6 +1743,40 @@ body.drag-selecting * {
 
 #image-playground.hcai-image-playground-shell
   [data-input-bar]
+  .hcai-image-action-buttons {
+  align-items: center;
+}
+
+#image-playground.hcai-image-playground-shell
+  [data-input-bar]
+  .hcai-image-action-icon {
+  display: inline-flex;
+  flex: 0 0 42px;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  min-width: 42px;
+  max-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  max-height: 42px;
+  aspect-ratio: 1 / 1;
+  padding: 0 !important;
+  border-radius: 999px !important;
+  line-height: 1;
+}
+
+#image-playground.hcai-image-playground-shell
+  [data-input-bar]
+  .hcai-image-action-icon
+  svg {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+}
+
+#image-playground.hcai-image-playground-shell
+  [data-input-bar]
   .hcai-playground-param-control {
   border-radius: 999px !important;
 }

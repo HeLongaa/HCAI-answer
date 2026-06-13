@@ -48,6 +48,7 @@ interface ApiConfig extends AxiosRequestConfig {
   ignoreError?: '403' | '50X';
   // Configure whether to pass errors directly
   passingError?: boolean;
+  skipErrorModal?: boolean;
 }
 
 class Request {
@@ -121,14 +122,16 @@ class Request {
               });
             }
 
-            if (data.err_type === 'modal') {
+            if (data.err_type === 'modal' && !errConfig?.skipErrorModal) {
               // modal error message
               Modal.confirm({
                 content: msg,
               });
             }
 
-            return Promise.reject(false);
+            return Promise.reject(
+              errConfig?.skipErrorModal ? errorObject : false,
+            );
           }
 
           if (data instanceof Array && data.length > 0) {
@@ -140,12 +143,16 @@ class Request {
 
           if (!data || Object.keys(data).length <= 0) {
             // default error msg will show modal
-            Modal.confirm({
-              content: msg,
-              showConfirm: false,
-              cancelText: 'close',
-            });
-            return Promise.reject(false);
+            if (!errConfig?.skipErrorModal) {
+              Modal.confirm({
+                content: msg,
+                showConfirm: false,
+                cancelText: 'close',
+              });
+            }
+            return Promise.reject(
+              errConfig?.skipErrorModal ? errorObject : false,
+            );
           }
         }
         // 401: Re-login required
@@ -234,16 +241,12 @@ class Request {
   public post<T = any>(
     url: string,
     data?: any,
-    config?: AxiosRequestConfig,
+    config?: ApiConfig,
   ): Promise<T> {
     return this.instance.post(url, data, config);
   }
 
-  public put<T = any>(
-    url: string,
-    data?: any,
-    config?: AxiosRequestConfig,
-  ): Promise<T> {
+  public put<T = any>(url: string, data?: any, config?: ApiConfig): Promise<T> {
     return this.instance.put(url, data, config);
   }
 

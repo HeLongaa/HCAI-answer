@@ -269,7 +269,7 @@
 }
 
 .inspiration-primary {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .inspiration-section,
@@ -487,10 +487,14 @@
 }
 
 .inspiration-latest {
-  overflow: hidden;
+  position: relative;
+  z-index: 2;
+  overflow: visible;
 }
 
 .inspiration-latest-toolbar {
+  position: relative;
+  z-index: 5;
   gap: 8px;
   min-height: 52px;
   padding: 10px 14px;
@@ -531,7 +535,9 @@
   box-shadow: 0 0 0 3px rgba(50, 103, 245, 0.1);
 }
 
-.inspiration-select .dropdown-menu {
+.inspiration-select .dropdown-menu,
+.inspiration-select-menu {
+  z-index: 1055;
   min-width: 172px;
   padding: 7px;
   border: 1px solid rgba(100, 121, 164, 0.14);
@@ -831,8 +837,12 @@
   max-width: 920px;
 }
 
-.inspiration-form-head > div {
-  padding-left: 180px;
+.inspiration-form-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  max-width: 920px;
 }
 
 .inspiration-form-grid {
@@ -910,6 +920,12 @@
   font-size: 14px;
   font-weight: 800;
   backdrop-filter: blur(16px) saturate(1.25);
+}
+
+.inspiration-form-head .inspiration-back-button {
+  position: static;
+  margin-top: 6px;
+  white-space: nowrap;
 }
 
 .inspiration-back-button:hover {
@@ -1018,6 +1034,41 @@
   color: #1b2944;
   font-size: 21px;
   font-weight: 850;
+}
+
+.inspiration-section-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.inspiration-section-heading h2 {
+  margin-bottom: 0;
+}
+
+.inspiration-prompt-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.inspiration-prompt-actions .btn {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  border-radius: 999px;
+  font-weight: 750;
+}
+
+.inspiration-prompt-actions .btn:first-child {
+  width: 34px;
+  padding-right: 0;
+  padding-left: 0;
 }
 
 .inspiration-detail-content {
@@ -1727,17 +1778,20 @@
   box-shadow: 0 0 0 3px rgba(126, 162, 255, 0.12);
 }
 
-[data-bs-theme='dark'] .inspiration-select .dropdown-menu {
+[data-bs-theme='dark'] .inspiration-select .dropdown-menu,
+[data-bs-theme='dark'] .inspiration-select-menu {
   border-color: var(--inspiration-border);
   background: rgba(17, 26, 39, 0.98);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.38);
 }
 
-[data-bs-theme='dark'] .inspiration-select .dropdown-item {
+[data-bs-theme='dark'] .inspiration-select .dropdown-item,
+[data-bs-theme='dark'] .inspiration-select-menu .dropdown-item {
   color: var(--inspiration-text-soft);
 }
 
-[data-bs-theme='dark'] .inspiration-select .dropdown-item:hover {
+[data-bs-theme='dark'] .inspiration-select .dropdown-item:hover,
+[data-bs-theme='dark'] .inspiration-select-menu .dropdown-item:hover {
   color: #a9c0ff;
   background: rgba(126, 162, 255, 0.12);
 }
@@ -1832,6 +1886,17 @@
 [data-bs-theme='dark'] .inspiration-detail-content,
 [data-bs-theme='dark'] .inspiration-prompt {
   color: var(--inspiration-text-soft);
+}
+
+[data-bs-theme='dark'] .inspiration-prompt-actions .btn-outline-secondary {
+  border-color: var(--inspiration-border-strong);
+  color: var(--inspiration-text-soft);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-bs-theme='dark'] .inspiration-prompt-actions .btn-outline-secondary:hover {
+  color: #fff;
+  background: rgba(126, 162, 255, 0.18);
 }
 
 [data-bs-theme='dark'] .inspiration-prompt {
@@ -1947,6 +2012,10 @@
     padding-right: 20px;
     padding-left: 20px;
   }
+
+  .inspiration-section-heading {
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 575.98px) {
@@ -1985,6 +2054,10 @@
 
   .inspiration-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .inspiration-section-heading {
+    flex-wrap: wrap;
   }
 
   .inspiration-comment-form {

@@ -20,6 +20,15 @@ func NewInspirationController(inspirationService *inspiration.InspirationService
 	return &InspirationController{inspirationService: inspirationService}
 }
 
+func getRequiredLoginUserID(ctx *gin.Context) (string, bool) {
+	userID := middleware.GetLoginUserIDFromContext(ctx)
+	if userID == "" {
+		handler.HandleResponse(ctx, errors.Unauthorized(reason.UnauthorizedError), nil)
+		return "", false
+	}
+	return userID, true
+}
+
 func (ctrl *InspirationController) List(ctx *gin.Context) {
 	req := &schema.InspirationListReq{}
 	if handler.BindAndCheck(ctx, req) {
@@ -68,7 +77,11 @@ func (ctrl *InspirationController) Create(ctx *gin.Context) {
 	if handler.BindAndCheck(ctx, req) {
 		return
 	}
-	req.UserID = middleware.GetLoginUserIDFromContext(ctx)
+	userID, ok := getRequiredLoginUserID(ctx)
+	if !ok {
+		return
+	}
+	req.UserID = userID
 	resp, err := ctrl.inspirationService.Create(ctx, req)
 	handler.HandleResponse(ctx, err, resp)
 }
@@ -83,7 +96,11 @@ func (ctrl *InspirationController) Update(ctx *gin.Context) {
 	if handler.BindAndCheck(ctx, req) {
 		return
 	}
-	req.UserID = middleware.GetLoginUserIDFromContext(ctx)
+	userID, ok := getRequiredLoginUserID(ctx)
+	if !ok {
+		return
+	}
+	req.UserID = userID
 	req.IsAdmin = middleware.GetUserIsAdminModerator(ctx)
 	resp, err := ctrl.inspirationService.Update(ctx, req)
 	handler.HandleResponse(ctx, err, resp)
@@ -95,7 +112,11 @@ func (ctrl *InspirationController) Delete(ctx *gin.Context) {
 		handler.HandleResponse(ctx, errors.BadRequest(reason.RequestFormatError), nil)
 		return
 	}
-	err = ctrl.inspirationService.Delete(ctx, id, middleware.GetLoginUserIDFromContext(ctx), middleware.GetUserIsAdminModerator(ctx))
+	userID, ok := getRequiredLoginUserID(ctx)
+	if !ok {
+		return
+	}
+	err = ctrl.inspirationService.Delete(ctx, id, userID, middleware.GetUserIsAdminModerator(ctx))
 	handler.HandleResponse(ctx, err, nil)
 }
 
@@ -120,7 +141,11 @@ func (ctrl *InspirationController) Like(ctx *gin.Context) {
 		handler.HandleResponse(ctx, errors.BadRequest(reason.RequestFormatError), nil)
 		return
 	}
-	err = ctrl.inspirationService.Like(ctx, id, middleware.GetLoginUserIDFromContext(ctx), true)
+	userID, ok := getRequiredLoginUserID(ctx)
+	if !ok {
+		return
+	}
+	err = ctrl.inspirationService.Like(ctx, id, userID, true)
 	handler.HandleResponse(ctx, err, nil)
 }
 
@@ -130,7 +155,11 @@ func (ctrl *InspirationController) Unlike(ctx *gin.Context) {
 		handler.HandleResponse(ctx, errors.BadRequest(reason.RequestFormatError), nil)
 		return
 	}
-	err = ctrl.inspirationService.Like(ctx, id, middleware.GetLoginUserIDFromContext(ctx), false)
+	userID, ok := getRequiredLoginUserID(ctx)
+	if !ok {
+		return
+	}
+	err = ctrl.inspirationService.Like(ctx, id, userID, false)
 	handler.HandleResponse(ctx, err, nil)
 }
 
@@ -140,7 +169,11 @@ func (ctrl *InspirationController) Favorite(ctx *gin.Context) {
 		handler.HandleResponse(ctx, errors.BadRequest(reason.RequestFormatError), nil)
 		return
 	}
-	err = ctrl.inspirationService.Favorite(ctx, id, middleware.GetLoginUserIDFromContext(ctx), true)
+	userID, ok := getRequiredLoginUserID(ctx)
+	if !ok {
+		return
+	}
+	err = ctrl.inspirationService.Favorite(ctx, id, userID, true)
 	handler.HandleResponse(ctx, err, nil)
 }
 
@@ -150,7 +183,11 @@ func (ctrl *InspirationController) Unfavorite(ctx *gin.Context) {
 		handler.HandleResponse(ctx, errors.BadRequest(reason.RequestFormatError), nil)
 		return
 	}
-	err = ctrl.inspirationService.Favorite(ctx, id, middleware.GetLoginUserIDFromContext(ctx), false)
+	userID, ok := getRequiredLoginUserID(ctx)
+	if !ok {
+		return
+	}
+	err = ctrl.inspirationService.Favorite(ctx, id, userID, false)
 	handler.HandleResponse(ctx, err, nil)
 }
 
@@ -160,7 +197,11 @@ func (ctrl *InspirationController) Share(ctx *gin.Context) {
 		handler.HandleResponse(ctx, errors.BadRequest(reason.RequestFormatError), nil)
 		return
 	}
-	err = ctrl.inspirationService.Share(ctx, id, middleware.GetLoginUserIDFromContext(ctx))
+	userID, ok := getRequiredLoginUserID(ctx)
+	if !ok {
+		return
+	}
+	err = ctrl.inspirationService.Share(ctx, id, userID)
 	handler.HandleResponse(ctx, err, nil)
 }
 
@@ -174,7 +215,11 @@ func (ctrl *InspirationController) AddComment(ctx *gin.Context) {
 	if handler.BindAndCheck(ctx, req) {
 		return
 	}
-	req.UserID = middleware.GetLoginUserIDFromContext(ctx)
+	userID, ok := getRequiredLoginUserID(ctx)
+	if !ok {
+		return
+	}
+	req.UserID = userID
 	resp, err := ctrl.inspirationService.AddComment(ctx, req)
 	handler.HandleResponse(ctx, err, resp)
 }
@@ -205,7 +250,11 @@ func (ctrl *InspirationController) Report(ctx *gin.Context) {
 	if handler.BindAndCheck(ctx, req) {
 		return
 	}
-	req.UserID = middleware.GetLoginUserIDFromContext(ctx)
+	userID, ok := getRequiredLoginUserID(ctx)
+	if !ok {
+		return
+	}
+	req.UserID = userID
 	err = ctrl.inspirationService.Report(ctx, req)
 	handler.HandleResponse(ctx, err, nil)
 }

@@ -115,7 +115,7 @@ export const generateAiImage = (params: Type.AiImageGenerateParams) => {
   return request.post<Type.AiImageGenerateResult>(
     '/answer/api/v1/ai-image/generations',
     params,
-    { timeout: aiImageTimeout },
+    { timeout: aiImageTimeout, ignoreError: '50X', skipErrorModal: true },
   );
 };
 
@@ -125,7 +125,7 @@ export const saveAiImageAgentGeneration = (
   return request.post<Type.AiImageGenerateResult>(
     '/answer/api/v1/ai-image/agent-generations',
     params,
-    { timeout: aiImageTimeout },
+    { timeout: aiImageTimeout, ignoreError: '50X', skipErrorModal: true },
   );
 };
 
@@ -141,7 +141,7 @@ export const editAiImage = (params: Type.AiImageEditParams) => {
   return request.post<Type.AiImageGenerateResult>(
     '/answer/api/v1/ai-image/edits',
     params,
-    { timeout: aiImageTimeout },
+    { timeout: aiImageTimeout, ignoreError: '50X', skipErrorModal: true },
   );
 };
 

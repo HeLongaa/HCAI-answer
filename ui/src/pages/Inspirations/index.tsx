@@ -56,7 +56,10 @@ const InspirationSelect: FC<{
       <Dropdown.Toggle variant="outline-secondary">
         {current?.label}
       </Dropdown.Toggle>
-      <Dropdown.Menu>
+      <Dropdown.Menu
+        className="inspiration-select-menu"
+        popperConfig={{ strategy: 'fixed' }}
+        renderOnMount>
         {options.map((option) => (
           <Dropdown.Item
             active={option.value === value}

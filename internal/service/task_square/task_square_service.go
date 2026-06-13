@@ -106,19 +106,27 @@ func unixTime(t time.Time) int64 {
 	return t.Unix()
 }
 
+func taskBigIntString(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "0"
+	}
+	return value
+}
+
 func (s *TaskSquareService) CreateTask(ctx context.Context, req *schema.TaskCreateReq) error {
 	status := entity.TaskStatusPendingReview
-	cols := []string{"user_id", "title", "description", "attachments", "status"}
+	cols := []string{"user_id", "reviewer_id", "assignee_id", "title", "description", "attachments", "status"}
 	var deadline time.Time
 	tags := []string{}
 	rewardPoints := 0
 	submissionRequirements := ""
 	reviewComment := ""
-	reviewerID := ""
+	reviewerID := "0"
 	if req.IsAdminModerator {
 		status = entity.TaskStatusOpen
 		cols = append(cols,
-			"tags", "reward_points", "deadline", "submission_requirements", "review_comment", "reviewer_id",
+			"tags", "reward_points", "deadline", "submission_requirements", "review_comment",
 		)
 		tags = req.Tags
 		rewardPoints = req.RewardPoints
@@ -130,8 +138,9 @@ func (s *TaskSquareService) CreateTask(ctx context.Context, req *schema.TaskCrea
 		}
 	}
 	task := &entity.Task{
-		UserID:                 req.UserID,
-		ReviewerID:             reviewerID,
+		UserID:                 taskBigIntString(req.UserID),
+		ReviewerID:             taskBigIntString(reviewerID),
+		AssigneeID:             "0",
 		Title:                  req.Title,
 		Description:            req.Description,
 		Tags:                   encodeList(tags),
@@ -229,11 +238,11 @@ func (s *TaskSquareService) ReviewTask(ctx context.Context, req *schema.TaskRevi
 		Attachments:            encodeList(req.Attachments),
 		Status:                 req.Status,
 		ReviewComment:          req.ReviewComment,
-		ReviewerID:             req.OperatorID,
+		ReviewerID:             taskBigIntString(req.OperatorID),
 	})
 	if err == nil {
 		task.Status = req.Status
-		task.AssigneeID = ""
+		task.AssigneeID = "0"
 		s.publishTaskChanged(task, task.UserID)
 		s.notifyTaskReviewed(ctx, task, req.OperatorID)
 	}
@@ -253,7 +262,7 @@ func (s *TaskSquareService) ClaimTask(ctx context.Context, req *schema.TaskClaim
 		Where("id = ? AND status = ? AND (assignee_id = '' OR assignee_id = '0')", req.ID, entity.TaskStatusOpen).
 		Cols("assignee_id", "claimed_at", "status").
 		Update(&entity.Task{
-			AssigneeID: req.UserID,
+			AssigneeID: taskBigIntString(req.UserID),
 			ClaimedAt:  time.Now(),
 			Status:     entity.TaskStatusInProgress,
 		})
@@ -263,7 +272,7 @@ func (s *TaskSquareService) ClaimTask(ctx context.Context, req *schema.TaskClaim
 	if affected == 0 {
 		return errors.BadRequest(reason.RequestFormatError)
 	}
-	task.AssigneeID = req.UserID
+	task.AssigneeID = taskBigIntString(req.UserID)
 	task.Status = entity.TaskStatusInProgress
 	s.publishTaskChanged(task, req.UserID)
 	s.notifyTaskClaimed(ctx, task, req.UserID)
@@ -283,7 +292,7 @@ func (s *TaskSquareService) AssignTask(ctx context.Context, req *schema.TaskAssi
 		Where("id = ? AND status IN (?, ?)", req.ID, entity.TaskStatusOpen, entity.TaskStatusInProgress).
 		Cols("assignee_id", "claimed_at", "status").
 		Update(&entity.Task{
-			AssigneeID: req.AssigneeID,
+			AssigneeID: taskBigIntString(req.AssigneeID),
 			ClaimedAt:  time.Now(),
 			Status:     entity.TaskStatusInProgress,
 		})
@@ -293,7 +302,7 @@ func (s *TaskSquareService) AssignTask(ctx context.Context, req *schema.TaskAssi
 	if affected == 0 {
 		return errors.BadRequest(reason.RequestFormatError)
 	}
-	task.AssigneeID = req.AssigneeID
+	task.AssigneeID = taskBigIntString(req.AssigneeID)
 	task.Status = entity.TaskStatusInProgress
 	s.publishTaskChanged(task, req.AssigneeID)
 	s.notifyTaskClaimed(ctx, task, req.OperatorID)
@@ -337,7 +346,8 @@ func (s *TaskSquareService) SubmitTask(ctx context.Context, req *schema.TaskSubm
 	}
 	submission := &entity.TaskSubmission{
 		TaskID:      req.ID,
-		UserID:      req.UserID,
+		UserID:      taskBigIntString(req.UserID),
+		ReviewerID:  "0",
 		Content:     req.Content,
 		Links:       encodeList(req.Links),
 		Attachments: encodeList(req.Attachments),
@@ -416,7 +426,7 @@ func (s *TaskSquareService) ReviewSubmission(ctx context.Context, req *schema.Ta
 				Update(&entity.TaskSubmission{
 					Status:     entity.TaskSubmissionStatusApproved,
 					ReviewNote: req.ReviewNote,
-					ReviewerID: req.OperatorID,
+					ReviewerID: taskBigIntString(req.OperatorID),
 				})
 			if err != nil {
 				_ = session.Rollback()
@@ -454,7 +464,7 @@ func (s *TaskSquareService) ReviewSubmission(ctx context.Context, req *schema.Ta
 				Update(&entity.TaskSubmission{
 					Status:     entity.TaskSubmissionStatusRejected,
 					ReviewNote: req.ReviewNote,
-					ReviewerID: req.OperatorID,
+					ReviewerID: taskBigIntString(req.OperatorID),
 				})
 			if err != nil {
 				_ = session.Rollback()
@@ -608,6 +618,7 @@ func (s *TaskSquareService) ListPointTransactions(ctx context.Context, req *sche
 
 func (s *TaskSquareService) FeaturePost(ctx context.Context, req *schema.FeaturedPostCreateReq) error {
 	req.QuestionID = uid.DeShortID(req.QuestionID)
+	req.OperatorID = taskBigIntString(req.OperatorID)
 	question := &entity.Question{ID: req.QuestionID}
 	has, err := s.data.DB.Context(ctx).Get(question)
 	if err != nil {
@@ -710,6 +721,7 @@ func (s *TaskSquareService) RevokeFeaturedPostRewardIfExists(ctx context.Context
 
 func (s *TaskSquareService) revokeFeaturedPostReward(ctx context.Context, questionID, operatorID string, ignoreMissing bool) error {
 	questionID = uid.DeShortID(questionID)
+	operatorID = taskBigIntString(operatorID)
 	featured := &entity.FeaturedPost{}
 	has, err := s.data.DB.Context(ctx).Where("question_id = ? AND active = ? AND revoked = ?", questionID, true, false).Get(featured)
 	if err != nil {
@@ -936,7 +948,7 @@ func (s *TaskSquareService) ensureFeaturedPostTagWithSession(ctx context.Context
 		Status:       entity.TagStatusAvailable,
 		Reserved:     true,
 		RevisionID:   "0",
-		UserID:       operatorID,
+		UserID:       taskBigIntString(operatorID),
 	}
 	if _, err = session.Insert(tag); err != nil {
 		return nil, err
@@ -1001,6 +1013,8 @@ func (s *TaskSquareService) refreshFeaturedPostTagCountWithSession(session *xorm
 }
 
 func (s *TaskSquareService) addPointsWithSession(ctx context.Context, session *xorm.Session, userID, sourceType, sourceID string, delta int, description, operatorID string) error {
+	userID = taskBigIntString(userID)
+	operatorID = taskBigIntString(operatorID)
 	if delta == 0 {
 		return nil
 	}

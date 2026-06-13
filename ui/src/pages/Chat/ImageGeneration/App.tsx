@@ -10,6 +10,10 @@ import {
   getCustomProviderConfigUrl,
   loadCustomProviderSettingsFromUrl,
 } from './lib/customProviderConfigUrl';
+import {
+  consumePendingImagePrompt,
+  PENDING_IMAGE_PROMPT_EVENT,
+} from './pendingPrompt';
 import Header from './components/Header';
 import PlaygroundTopbar from './components/PlaygroundTopbar';
 import TaskGrid from './components/TaskGrid';
@@ -51,6 +55,7 @@ interface AppProps {
 
 export default function App({ embedded = false }: AppProps) {
   const setSettings = useStore((s) => s.setSettings);
+  const setPrompt = useStore((s) => s.setPrompt);
   const loadSystemImageModels = useStore((s) => s.loadSystemImageModels);
   const loadSystemImageGenerations = useStore(
     (s) => s.loadSystemImageGenerations,
@@ -72,6 +77,29 @@ export default function App({ embedded = false }: AppProps) {
     (s) => s.activeFavoriteCollectionId,
   );
   useGlobalClickSuppression();
+
+  useEffect(() => {
+    const applyPrompt = (prompt: string) => {
+      const trimmedPrompt = prompt.trim();
+      if (!trimmedPrompt) {
+        return;
+      }
+      setAppMode('gallery');
+      setPrompt(trimmedPrompt);
+    };
+    const handlePromptEvent = (evt: Event) => {
+      const prompt =
+        evt instanceof CustomEvent && typeof evt.detail?.prompt === 'string'
+          ? evt.detail.prompt
+          : '';
+      applyPrompt(prompt);
+    };
+
+    window.addEventListener(PENDING_IMAGE_PROMPT_EVENT, handlePromptEvent);
+    return () => {
+      window.removeEventListener(PENDING_IMAGE_PROMPT_EVENT, handlePromptEvent);
+    };
+  }, [setAppMode, setPrompt]);
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -109,6 +137,11 @@ export default function App({ embedded = false }: AppProps) {
     let cancelled = false;
     void (async () => {
       await ensureImageGenerationInitialized();
+      const pendingPrompt = consumePendingImagePrompt();
+      if (!cancelled && pendingPrompt) {
+        setAppMode('gallery');
+        setPrompt(pendingPrompt);
+      }
       if (!cancelled) await loadSystemImageGenerations();
     })();
     void loadSystemImageModels();
@@ -116,7 +149,13 @@ export default function App({ embedded = false }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [loadSystemImageGenerations, loadSystemImageModels, setSettings]);
+  }, [
+    loadSystemImageGenerations,
+    loadSystemImageModels,
+    setAppMode,
+    setPrompt,
+    setSettings,
+  ]);
 
   useEffect(() => {
     if (

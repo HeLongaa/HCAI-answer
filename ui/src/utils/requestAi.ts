@@ -35,6 +35,7 @@ interface RequestAiOptions extends RequestInit {
   allow404?: boolean;
   ignoreError?: '403' | '50X';
   passingError?: boolean;
+  skipErrorModal?: boolean;
 }
 
 // create a object to track the current request state
@@ -84,12 +85,12 @@ const handleHttpError = async (
         return Promise.reject({ msg, ...data });
       }
 
-      if (data.err_type === 'modal') {
+      if (data.err_type === 'modal' && !options?.skipErrorModal) {
         Modal.confirm({
           content: msg,
         });
       }
-      return Promise.reject(false);
+      return Promise.reject(options?.skipErrorModal ? errorObject : false);
     }
 
     if (Array.isArray(data) && data.length > 0) {
@@ -101,12 +102,14 @@ const handleHttpError = async (
     }
 
     if (!data || Object.keys(data).length <= 0) {
-      Modal.confirm({
-        content: msg,
-        showConfirm: false,
-        cancelText: 'close',
-      });
-      return Promise.reject(false);
+      if (!options?.skipErrorModal) {
+        Modal.confirm({
+          content: msg,
+          showConfirm: false,
+          cancelText: 'close',
+        });
+      }
+      return Promise.reject(options?.skipErrorModal ? errorObject : false);
     }
   }
 
