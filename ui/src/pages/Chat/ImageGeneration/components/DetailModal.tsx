@@ -42,6 +42,10 @@ import {
 
 import ViewportTooltip from './ViewportTooltip';
 
+const imageNavButtonClass =
+  'absolute top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-slate-950/35 text-white/85 shadow-lg shadow-black/20 backdrop-blur-md transition hover:-translate-y-1/2 hover:scale-105 hover:border-white/30 hover:bg-slate-900/65 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-400/60';
+const imageNavIconClass = 'w-4 h-4';
+
 export default function DetailModal() {
   const tasks = useStore((s) => s.tasks);
   const detailTaskId = useStore((s) => s.detailTaskId);
@@ -220,6 +224,7 @@ export default function DetailModal() {
     (currentOutputImageId
       ? outputPreviewSrcs[currentOutputImageId] || ''
       : '') || currentRawImageUrl;
+  const currentOutputRenderKey = `${detailTaskId || 'task'}:${imageIndex}:${currentOutputSource}`;
   const maskTargetId = task?.maskTargetImageId || null;
   const maskTargetSrc = maskTargetId ? imageSrcs[maskTargetId] || '' : '';
   const maskSrc = task?.maskImageId ? imageSrcs[task.maskImageId] || '' : '';
@@ -233,6 +238,13 @@ export default function DetailModal() {
     }
 
     let cancelled = false;
+    setOutputPreviewSrcs((prev) => {
+      const next: Record<string, string> = {};
+      for (const imageId of outputImageIds) {
+        if (prev[imageId]) next[imageId] = prev[imageId];
+      }
+      return next;
+    });
     const setOutputImage = (imageId: string, dataUrl: string) => {
       if (!cancelled)
         setOutputPreviewSrcs((prev) => ({ ...prev, [imageId]: dataUrl }));
@@ -245,7 +257,15 @@ export default function DetailModal() {
       } else {
         ensureImageCached(imageId)
           .then((dataUrl) => {
-            if (dataUrl) setOutputImage(imageId, dataUrl);
+            if (
+              dataUrl &&
+              useStore
+                .getState()
+                .tasks.find((item) => item.id === task?.id)
+                ?.outputImages?.includes(imageId)
+            ) {
+              setOutputImage(imageId, dataUrl);
+            }
           })
           .catch(() => {});
       }
@@ -544,8 +564,10 @@ export default function DetailModal() {
               currentOutputPreviewSrc && (
                 <>
                   <img
+                    key={currentOutputRenderKey}
                     src={currentOutputPreviewSrc}
                     data-image-id={currentOutputImageId || undefined}
+                    data-output-index={imageIndex}
                     className="saveable-image max-w-[calc(100%-2rem)] max-h-[calc(100%-2rem)] object-contain cursor-pointer"
                     onLoad={(e) => {
                       const image = e.currentTarget;
@@ -613,9 +635,9 @@ export default function DetailModal() {
                             (imageIndex - 1 + outputLen) % outputLen,
                           )
                         }
-                        className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/30 text-white hover:bg-black/50 transition">
+                        className={`${imageNavButtonClass} left-3`}>
                         <svg
-                          className="w-5 h-5"
+                          className={imageNavIconClass}
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24">
@@ -631,9 +653,9 @@ export default function DetailModal() {
                         onClick={() =>
                           setImageIndex((imageIndex + 1) % outputLen)
                         }
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/30 text-white hover:bg-black/50 transition">
+                        className={`${imageNavButtonClass} right-3`}>
                         <svg
-                          className="w-5 h-5"
+                          className={imageNavIconClass}
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24">
@@ -712,9 +734,9 @@ export default function DetailModal() {
                                 streamPreviewLen,
                             )
                           }
-                          className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/30 text-white hover:bg-black/50 transition">
+                          className={`${imageNavButtonClass} left-3`}>
                           <svg
-                            className="w-5 h-5"
+                            className={imageNavIconClass}
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24">
@@ -730,9 +752,9 @@ export default function DetailModal() {
                           onClick={() =>
                             setImageIndex((imageIndex + 1) % streamPreviewLen)
                           }
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/30 text-white hover:bg-black/50 transition">
+                          className={`${imageNavButtonClass} right-3`}>
                           <svg
-                            className="w-5 h-5"
+                            className={imageNavIconClass}
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24">

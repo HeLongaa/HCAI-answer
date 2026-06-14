@@ -1171,6 +1171,7 @@ export interface AiImageEditParams {
 export interface AiImageGenerateResult {
   generation_id: string;
   size: string;
+  images?: string[];
   image_urls: string[];
   expires_at: number;
 }

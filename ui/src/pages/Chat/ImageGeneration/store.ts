@@ -4399,6 +4399,47 @@ async function imageUrlToDataUrlWithRetry(url: string) {
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+async function cacheTaskImageUrlsInBackground(
+  taskId: string,
+  imageUrls: string[],
+  startIndex = 0,
+) {
+  if (!imageUrls.length) return;
+  const resolvedOutputImages: string[] = [];
+  for (let index = 0; index < imageUrls.length; index += 1) {
+    const imageUrl = imageUrls[index];
+    try {
+      const dataUrl = await imageUrlToDataUrlWithRetry(imageUrl);
+      const imgId = await storeImage(dataUrl, 'generated');
+      cacheImage(imgId, dataUrl);
+      resolvedOutputImages[index] = imgId;
+    } catch (err) {
+      console.warn('Failed to cache generated image URL', err);
+    }
+  }
+  if (!resolvedOutputImages.some(Boolean)) return;
+
+  const latestTask = useStore
+    .getState()
+    .tasks.find((item) => item.id === taskId);
+  if (!latestTask) return;
+
+  const nextOutputImages = [...(latestTask.outputImages || [])];
+  for (let index = 0; index < resolvedOutputImages.length; index += 1) {
+    const imgId = resolvedOutputImages[index];
+    if (!imgId) continue;
+    const outputIndex = startIndex + index;
+    if (nextOutputImages[outputIndex]) continue;
+    nextOutputImages[outputIndex] = imgId;
+  }
+  if (nextOutputImages.join('\n') === (latestTask.outputImages || []).join('\n'))
+    return;
+
+  updateTaskInStore(taskId, {
+    outputImages: nextOutputImages,
+  });
+}
+
 interface SystemImageStreamResult {
   generationId: string;
   size: string;
@@ -4602,6 +4643,7 @@ function normalizeSystemGenerationStatus(status?: string): TaskStatus {
   if (status === 'failed' || status === 'error') return 'error';
   if (
     status === 'queued' ||
+    status === 'saving' ||
     status === 'generating' ||
     status === 'processing' ||
     status === 'in_progress'
@@ -4870,8 +4912,7 @@ async function executeSystemImageTask(taskId: string) {
     const shouldStreamSystemImage =
       systemModel?.supports_stream === true &&
       inputDataUrls.length === 0 &&
-      !maskDataUrl &&
-      count === 1;
+      !maskDataUrl;
     const requestParams: AiImageGenerateParams = {
       prompt: replaceImageMentionsForApi(task.prompt, inputDataUrls.length),
       model:
@@ -4899,7 +4940,13 @@ async function executeSystemImageTask(taskId: string) {
             ),
           },
           (partial) => {
-            useStore.getState().setTaskStreamPreview(taskId, partial.image, 0);
+            useStore
+              .getState()
+              .setTaskStreamPreview(
+                taskId,
+                partial.image,
+                partial.partialImageIndex,
+              );
             void persistTaskStreamPartialImage(taskId, partial.image);
           },
           (generationId) => {
@@ -4916,7 +4963,7 @@ async function executeSystemImageTask(taskId: string) {
 
     const responseImageUrls =
       'imageUrls' in response ? response.imageUrls : response.image_urls || [];
-    const responseImages = 'images' in response ? response.images : [];
+    const responseImages = 'images' in response ? response.images || [] : [];
     const responseGenerationId =
       'generationId' in response
         ? response.generationId
@@ -4928,13 +4975,9 @@ async function executeSystemImageTask(taskId: string) {
       cacheImage(imgId, image);
       outputIds.push(imgId);
     }
-    for (const imageUrl of responseImageUrls.slice(outputIds.length)) {
-      const dataUrl = await imageUrlToDataUrlWithRetry(imageUrl);
-      const imgId = await storeImage(dataUrl, 'generated');
-      cacheImage(imgId, dataUrl);
-      outputIds.push(imgId);
-    }
-    if (outputIds.length === 0) throw new Error('接口没有返回图片');
+    const pendingImageUrls = responseImageUrls.slice(outputIds.length);
+    if (outputIds.length === 0 && responseImageUrls.length === 0)
+      throw new Error('接口没有返回图片');
 
     const latestBeforeUpdate = useStore
       .getState()
@@ -4951,7 +4994,7 @@ async function executeSystemImageTask(taskId: string) {
       actualParams: {
         ...task.params,
         size: response.size || task.params.size,
-        n: outputIds.length,
+        n: Math.max(outputIds.length, responseImageUrls.length),
       },
       status: 'done',
       error: null,
@@ -4961,15 +5004,23 @@ async function executeSystemImageTask(taskId: string) {
       customRecoverable: false,
     });
 
+    void cacheTaskImageUrlsInBackground(
+      taskId,
+      pendingImageUrls,
+      outputIds.length,
+    );
     useStore.getState().setTaskStreamPreview(taskId);
     void deleteUnreferencedImageIds(partialImageIdsToClean);
 
     useStore
       .getState()
-      .showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success');
+      .showToast(
+        `生成完成，共 ${Math.max(outputIds.length, responseImageUrls.length)} 张图片`,
+        'success',
+      );
     showTaskCompletionNotification(
       '图像生成完成',
-      `生成完成，共 ${outputIds.length} 张图片。`,
+      `生成完成，共 ${Math.max(outputIds.length, responseImageUrls.length)} 张图片。`,
     );
     window.dispatchEvent(new CustomEvent('hcai-subscription-updated'));
     void useStore.getState().loadSystemImageGenerations();

@@ -1500,7 +1500,7 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 		"ai image generation start generation_id=%s user_id=%s site_model=%s provider=%s provider_model=%s size=%s aspect_ratio=%s quality=%s count=%d references=%d",
 		generationID, userID, model.SiteModelID, provider.Name, actualProviderModelID, req.Size, req.AspectRatio, req.Quality, req.Count, len(req.ReferenceImages),
 	)
-	imageURLs, err := s.callAndSaveImages(runCtx, provider, upstreamModel, generationID, userID, req)
+	imageResult, err := s.callAndSaveImages(runCtx, provider, upstreamModel, generationID, userID, req)
 	if err != nil {
 		log.Errorf(
 			"ai image generation failed generation_id=%s user_id=%s site_model=%s provider=%s provider_model=%s references=%d error=%v",
@@ -1515,21 +1515,34 @@ func (s *aiChatConfigService) GenerateImage(ctx context.Context, userID string, 
 		}
 		return nil, errors.BadRequest(fmt.Sprintf("failed to generate image: %s", err.Error()))
 	}
-	rawURLs, _ := json.Marshal(imageURLs)
-	if err := s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{
-		Count:     len(imageURLs),
-		ImageURLs: string(rawURLs),
-		Status:    "completed",
-		Error:     "",
-	}, "count", "image_urls", "status", "error"); err != nil {
-		log.Errorf("ai image generation record update failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
-		return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+	if imageResult.SavePending {
+		if err := s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{
+			Count:  len(imageResult.Images),
+			Status: "saving",
+			Error:  "",
+		}, "count", "status", "error"); err != nil {
+			log.Errorf("ai image generation saving status update failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+		}
+		go s.saveImageResultAsync(runCtx, userID, generationID, imageResult)
+		log.Infof("ai image generation returned before save generation_id=%s user_id=%s image_count=%d", generationID, userID, len(imageResult.Images))
+	} else {
+		rawURLs, _ := json.Marshal(imageResult.ImageURLs)
+		if err := s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{
+			Count:     len(imageResult.ImageURLs),
+			ImageURLs: string(rawURLs),
+			Status:    "completed",
+			Error:     "",
+		}, "count", "image_urls", "status", "error"); err != nil {
+			log.Errorf("ai image generation record update failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+			return nil, errors.InternalServer(reason.DatabaseError).WithError(err)
+		}
 	}
-	log.Infof("ai image generation completed generation_id=%s user_id=%s image_count=%d", generationID, userID, len(imageURLs))
+	log.Infof("ai image generation completed generation_id=%s user_id=%s image_count=%d save_pending=%t", generationID, userID, imageResult.Count(), imageResult.SavePending)
 	return &schema.AIImageGenerateResp{
 		GenerationID: generationID,
 		Size:         req.Size,
-		ImageURLs:    imageURLs,
+		Images:       imageResult.Images,
+		ImageURLs:    imageResult.ImageURLs,
 		ExpiresAt:    expiresAt.Unix(),
 	}, nil
 }
@@ -1556,8 +1569,8 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 	if req.Count <= 0 {
 		req.Count = 1
 	}
-	if req.Count != 1 {
-		return errors.BadRequest("stream image generation only supports count=1")
+	if req.Count > 4 {
+		return errors.BadRequest("count cannot be greater than 4")
 	}
 	if len(req.ReferenceImages) > 0 || strings.TrimSpace(req.MaskImage) != "" {
 		return errors.BadRequest("stream image generation does not support reference images yet")
@@ -1641,7 +1654,7 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 		Background:       req.Background,
 		ReferenceImages:  string(referenceImagesJSON),
 		APIMode:          apiMode,
-		Count:            1,
+		Count:            req.Count,
 		ImageURLs:        string(pendingURLs),
 		PartialImageURLs: string(pendingPartialURLs),
 		Status:           "generating",
@@ -1655,17 +1668,6 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 		return errors.InternalServer(reason.DatabaseError).WithError(err)
 	}
 
-	endpoint := "/images/generations"
-	payload := s.buildImageStreamPayload(provider, upstreamModel, req)
-	if apiMode == "responses" {
-		endpoint = "/responses"
-		payload = s.buildResponsesImageStreamPayload(upstreamModel, req)
-	}
-	bodyBytes, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	upstreamURL := strings.TrimRight(provider.BaseURL, "/") + endpoint
 	_ = writeImageSSE(writer, map[string]any{
 		"type":          "image_generation.created",
 		"generation_id": generationID,
@@ -1675,22 +1677,25 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 	})
 	flush()
 
-	resp, err := doImageStreamUpstreamRequest(runCtx, upstreamURL, provider.APIKey, bodyBytes, generationID, endpoint)
-	if err != nil {
-		_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
-		return err
-	}
-	defer resp.Body.Close()
-
-	finalBody, err := s.proxyAndSaveImageStream(runCtx, ctx, resp.Body, writer, flush, userID, generationID, req.Size)
-	if err != nil {
-		_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
-		return err
-	}
-	imageURLs, err := s.saveImageAPIResponse(runCtx, userID, generationID, finalBody)
-	if err != nil {
-		_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
-		return err
+	imageURLs := make([]string, 0, req.Count)
+	for i := 0; i < req.Count; i++ {
+		singleReq := *req
+		singleReq.Count = 1
+		partGenerationID := generationID
+		if req.Count > 1 {
+			partGenerationID = fmt.Sprintf("%s_%d", generationID, i)
+			_ = writeImageSSEWithFlush(ctx, writer, map[string]any{
+				"type":          "image_generation.item_started",
+				"generation_id": generationID,
+				"item_index":    i,
+			}, flush, imageStreamDownstreamTimeout)
+		}
+		partURLs, err := s.generateSingleImageStream(runCtx, ctx, provider, upstreamModel, apiMode, partGenerationID, userID, &singleReq, writer, flush, i)
+		if err != nil {
+			_ = s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{Status: "failed", Error: err.Error()}, "status", "error")
+			return err
+		}
+		imageURLs = append(imageURLs, partURLs...)
 	}
 	rawURLs, _ := json.Marshal(imageURLs)
 	if err := s.repo.UpdateImageGeneration(runCtx, generationID, &entity.AIImageGeneration{
@@ -1714,6 +1719,48 @@ func (s *aiChatConfigService) GenerateImageStream(ctx context.Context, userID st
 	return nil
 }
 
+func (s *aiChatConfigService) generateSingleImageStream(
+	runCtx context.Context,
+	clientCtx context.Context,
+	provider *entity.AIImageProvider,
+	upstreamModel *entity.AIImageModel,
+	apiMode string,
+	generationID string,
+	userID string,
+	req *schema.AIImageGenerateReq,
+	writer io.Writer,
+	flush func(),
+	itemIndex int,
+) ([]string, error) {
+	endpoint := "/images/generations"
+	payload := s.buildImageStreamPayload(provider, upstreamModel, req)
+	if apiMode == "responses" {
+		endpoint = "/responses"
+		payload = s.buildResponsesImageStreamPayload(upstreamModel, req)
+	}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	upstreamURL := strings.TrimRight(provider.BaseURL, "/") + endpoint
+
+	resp, err := doImageStreamUpstreamRequest(runCtx, upstreamURL, provider.APIKey, bodyBytes, generationID, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	finalBody, err := s.proxyAndSaveImageStream(runCtx, clientCtx, resp.Body, writer, flush, userID, generationID, req.Size, itemIndex)
+	if err != nil {
+		return nil, err
+	}
+	imageURLs, err := s.saveImageAPIResponse(runCtx, userID, generationID, finalBody)
+	if err != nil {
+		return nil, err
+	}
+	return imageURLs, nil
+}
+
 func (s *aiChatConfigService) proxyAndSaveImageStream(
 	ctx context.Context,
 	clientCtx context.Context,
@@ -1723,6 +1770,7 @@ func (s *aiChatConfigService) proxyAndSaveImageStream(
 	userID string,
 	generationID string,
 	size string,
+	itemIndex int,
 ) ([]byte, error) {
 	var finalBody []byte
 	var lastPartialImage string
@@ -1797,6 +1845,10 @@ func (s *aiChatConfigService) proxyAndSaveImageStream(
 		if result.PartialImageB64 != "" {
 			lastPartialImage = result.PartialImageB64
 			lastPartialAt = time.Now()
+			if itemIndex > 0 {
+				result.PartialImageIndex = itemIndex
+				result.Event["partial_image_index"] = itemIndex
+			}
 			if imageURL, err := s.saveImageStreamPartial(userID, generationID, result.PartialImageIndex, result.PartialImageB64); err != nil {
 				log.Errorf("ai image stream partial save failed generation_id=%s user_id=%s index=%d error=%v", generationID, userID, result.PartialImageIndex, err)
 			} else if imageURL != "" {
@@ -3330,21 +3382,21 @@ func (s *aiChatConfigService) callAndSaveImages(
 	generationID string,
 	userID string,
 	req *schema.AIImageGenerateReq,
-) ([]string, error) {
-	if req.Count > 1 {
+) (*imageGenerationResult, error) {
+	if shouldSplitImageBatch(provider, model, req) {
 		log.Infof("ai image batch split generation_id=%s requested_count=%d", generationID, req.Count)
-		imageURLs := make([]string, 0, req.Count)
+		result := &imageGenerationResult{}
 		singleReq := *req
 		singleReq.Count = 1
 		for i := 0; i < req.Count; i++ {
 			partGenerationID := fmt.Sprintf("%s_%d", generationID, i)
-			partURLs, err := s.callAndSaveImages(ctx, provider, model, partGenerationID, userID, &singleReq)
+			partResult, err := s.callAndSaveImages(ctx, provider, model, partGenerationID, userID, &singleReq)
 			if err != nil {
 				return nil, err
 			}
-			imageURLs = append(imageURLs, partURLs...)
+			result.Append(partResult)
 		}
-		return imageURLs, nil
+		return result, nil
 	}
 
 	baseURL := strings.TrimRight(provider.BaseURL, "/")
@@ -3359,7 +3411,8 @@ func (s *aiChatConfigService) callAndSaveImages(
 			return nil, fmt.Errorf("image model does not support reference images")
 		}
 		log.Infof("ai image upstream route generation_id=%s api_format=gemini references=%d", generationID, len(preparedImages))
-		return s.callGeminiImageAPI(ctx, newImageRestyClient(), baseURL, provider, model, generationID, userID, prompt, preparedImages)
+		imageURLs, err := s.callGeminiImageAPI(ctx, newImageRestyClient(), baseURL, provider, model, generationID, userID, prompt, preparedImages)
+		return imageGenerationResultFromURLs(imageURLs), err
 	}
 	payload := map[string]any{
 		"model":  model.ProviderModelID,
@@ -3404,7 +3457,8 @@ func (s *aiChatConfigService) callAndSaveImages(
 			return nil, err
 		}
 		log.Infof("ai image upstream route generation_id=%s api_mode=responses references=%d", generationID, len(preparedImages))
-		return s.callResponsesImageAPI(ctx, newImageRestyClient(), baseURL, provider, model, generationID, userID, req, prompt, preparedImages)
+		imageURLs, err := s.callResponsesImageAPI(ctx, newImageRestyClient(), baseURL, provider, model, generationID, userID, req, prompt, preparedImages)
+		return imageGenerationResultFromURLs(imageURLs), err
 	}
 	if len(req.ReferenceImages) > 0 {
 		if !model.SupportsRefs {
@@ -3421,9 +3475,10 @@ func (s *aiChatConfigService) callAndSaveImages(
 			return nil, fmt.Errorf("reference image is empty")
 		}
 		log.Infof("ai image prepared references generation_id=%s %s", generationID, summarizeReferenceImages(preparedImages))
-		return s.callAndSaveImagesWithReferences(
+		imageURLs, err := s.callAndSaveImagesWithReferences(
 			ctx, baseURL, provider, model, generationID, userID, req, prompt, payload, preparedImages,
 		)
+		return imageGenerationResultFromURLs(imageURLs), err
 	}
 	log.Infof("ai image upstream request generation_id=%s endpoint=%s model=%s size=%s count=%d references=0", generationID, "/images/generations", model.ProviderModelID, req.Size, req.Count)
 	resp, err := newImageRestyClient().
@@ -3442,7 +3497,20 @@ func (s *aiChatConfigService) callAndSaveImages(
 		return nil, fmt.Errorf("status %d: %s", resp.StatusCode(), resp.String())
 	}
 	log.Infof("ai image upstream success generation_id=%s endpoint=%s status=%d bytes=%d", generationID, "/images/generations", resp.StatusCode(), len(resp.Body()))
-	return s.saveImageAPIResponse(ctx, userID, generationID, resp.Body())
+	return s.imageAPIResponseResult(ctx, userID, generationID, resp.Body(), true)
+}
+
+func shouldSplitImageBatch(provider *entity.AIImageProvider, model *entity.AIImageModel, req *schema.AIImageGenerateReq) bool {
+	if req.Count <= 1 {
+		return false
+	}
+	if isGeminiLikeImageProvider(provider) || normalizeImageAPIMode(model.APIMode) == "responses" {
+		return true
+	}
+	if len(req.ReferenceImages) > 0 || strings.TrimSpace(req.MaskImage) != "" {
+		return true
+	}
+	return false
 }
 
 type preparedReferenceImage struct {
@@ -3463,6 +3531,44 @@ type imageDownloadOptions struct {
 	MaxBytes       int64
 	RequireHTTPS   bool
 	BlockPrivateIP bool
+}
+
+type parsedImageAPIItem struct {
+	DataURL string
+	Data    []byte
+	Ext     string
+	URL     string
+}
+
+type imageGenerationResult struct {
+	Images      []string
+	ImageURLs   []string
+	SaveItems   []parsedImageAPIItem
+	SavePending bool
+}
+
+func (r *imageGenerationResult) Append(part *imageGenerationResult) {
+	if r == nil || part == nil {
+		return
+	}
+	r.Images = append(r.Images, part.Images...)
+	r.ImageURLs = append(r.ImageURLs, part.ImageURLs...)
+	r.SaveItems = append(r.SaveItems, part.SaveItems...)
+	r.SavePending = r.SavePending || part.SavePending
+}
+
+func (r *imageGenerationResult) Count() int {
+	if r == nil {
+		return 0
+	}
+	if len(r.Images) > 0 {
+		return len(r.Images)
+	}
+	return len(r.ImageURLs)
+}
+
+func imageGenerationResultFromURLs(imageURLs []string) *imageGenerationResult {
+	return &imageGenerationResult{ImageURLs: imageURLs}
 }
 
 func (s *aiChatConfigService) callAndSaveImagesWithReferences(
@@ -3771,7 +3877,7 @@ func (s *aiChatConfigService) saveGeminiImageResponse(_ context.Context, userID,
 	return imageURLs, nil
 }
 
-func (s *aiChatConfigService) saveImageAPIResponse(ctx context.Context, userID, generationID string, body []byte) ([]string, error) {
+func (s *aiChatConfigService) parseImageAPIResponse(ctx context.Context, generationID string, body []byte) ([]parsedImageAPIItem, error) {
 	var parsed struct {
 		Data []struct {
 			URL     string `json:"url"`
@@ -3816,7 +3922,7 @@ func (s *aiChatConfigService) saveImageAPIResponse(ctx context.Context, userID, 
 		log.Errorf("ai image response empty generation_id=%s bytes=%d body=%s", generationID, len(body), responseSnippet(body))
 		return nil, fmt.Errorf("empty image response")
 	}
-	imageURLs := make([]string, 0, len(parsed.Data))
+	items := make([]parsedImageAPIItem, 0, len(parsed.Data))
 	for i, item := range parsed.Data {
 		var data []byte
 		ext := ".png"
@@ -3827,28 +3933,116 @@ func (s *aiChatConfigService) saveImageAPIResponse(ctx context.Context, userID, 
 				log.Errorf("ai image response b64 decode failed generation_id=%s index=%d error=%v", generationID, i, err)
 				return nil, err
 			}
+			mimeType := mime.TypeByExtension(ext)
+			if mimeType == "" {
+				mimeType = "image/png"
+			}
+			items = append(items, parsedImageAPIItem{
+				DataURL: fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data)),
+				Data:    data,
+				Ext:     ext,
+			})
 		} else if item.URL != "" {
 			data, ext, err = downloadImage(ctx, item.URL, imageDownloadOptions{})
 			if err != nil {
 				log.Errorf("ai image response image download failed generation_id=%s index=%d error=%v", generationID, i, err)
 				return nil, err
 			}
+			items = append(items, parsedImageAPIItem{
+				Data: data,
+				Ext:  ext,
+				URL:  item.URL,
+			})
 		} else {
 			continue
 		}
-		url, err := s.saveGeneratedImage(userID, generationID, i, ext, data)
+	}
+	if len(items) == 0 {
+		log.Errorf("ai image response no usable data generation_id=%s bytes=%d body=%s", generationID, len(body), responseSnippet(body))
+		return nil, fmt.Errorf("no image data in response")
+	}
+	return items, nil
+}
+
+func (s *aiChatConfigService) saveParsedImageAPIItems(userID, generationID string, items []parsedImageAPIItem) ([]string, error) {
+	imageURLs := make([]string, 0, len(items))
+	for i, item := range items {
+		url, err := s.saveGeneratedImage(userID, generationID, i, item.Ext, item.Data)
 		if err != nil {
-			log.Errorf("ai image save file failed generation_id=%s index=%d ext=%s bytes=%d error=%v", generationID, i, ext, len(data), err)
+			log.Errorf("ai image save file failed generation_id=%s index=%d ext=%s bytes=%d error=%v", generationID, i, item.Ext, len(item.Data), err)
 			return nil, err
 		}
 		imageURLs = append(imageURLs, url)
 	}
 	if len(imageURLs) == 0 {
-		log.Errorf("ai image response no usable data generation_id=%s bytes=%d body=%s", generationID, len(body), responseSnippet(body))
 		return nil, fmt.Errorf("no image data in response")
 	}
 	log.Infof("ai image response saved generation_id=%s image_count=%d", generationID, len(imageURLs))
 	return imageURLs, nil
+}
+
+func (s *aiChatConfigService) imageAPIResponseResult(ctx context.Context, userID, generationID string, body []byte, allowAsyncSave bool) (*imageGenerationResult, error) {
+	items, err := s.parseImageAPIResponse(ctx, generationID, body)
+	if err != nil {
+		return nil, err
+	}
+	images := make([]string, 0, len(items))
+	allInline := true
+	for _, item := range items {
+		if item.DataURL == "" {
+			allInline = false
+			break
+		}
+		images = append(images, item.DataURL)
+	}
+	if allowAsyncSave && allInline && len(images) > 0 {
+		return &imageGenerationResult{
+			Images:      images,
+			SaveItems:   items,
+			SavePending: true,
+		}, nil
+	}
+	imageURLs, err := s.saveParsedImageAPIItems(userID, generationID, items)
+	if err != nil {
+		return nil, err
+	}
+	return imageGenerationResultFromURLs(imageURLs), nil
+}
+
+func (s *aiChatConfigService) saveImageResultAsync(ctx context.Context, userID, generationID string, result *imageGenerationResult) {
+	if result == nil || len(result.SaveItems) == 0 {
+		return
+	}
+	imageURLs, err := s.saveParsedImageAPIItems(userID, generationID, result.SaveItems)
+	if err != nil {
+		log.Errorf("ai image async save failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+		if updateErr := s.repo.UpdateImageGeneration(ctx, generationID, &entity.AIImageGeneration{
+			Status: "failed",
+			Error:  fmt.Sprintf("image save failed: %s", err.Error()),
+		}, "status", "error"); updateErr != nil {
+			log.Errorf("ai image async save failure status update failed generation_id=%s user_id=%s error=%v", generationID, userID, updateErr)
+		}
+		return
+	}
+	rawURLs, _ := json.Marshal(imageURLs)
+	if err := s.repo.UpdateImageGeneration(ctx, generationID, &entity.AIImageGeneration{
+		Count:     len(imageURLs),
+		ImageURLs: string(rawURLs),
+		Status:    "completed",
+		Error:     "",
+	}, "count", "image_urls", "status", "error"); err != nil {
+		log.Errorf("ai image async save record update failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
+		return
+	}
+	log.Infof("ai image async save completed generation_id=%s user_id=%s image_count=%d", generationID, userID, len(imageURLs))
+}
+
+func (s *aiChatConfigService) saveImageAPIResponse(ctx context.Context, userID, generationID string, body []byte) ([]string, error) {
+	result, err := s.imageAPIResponseResult(ctx, userID, generationID, body, false)
+	if err != nil {
+		return nil, err
+	}
+	return result.ImageURLs, nil
 }
 
 func (s *aiChatConfigService) saveGeneratedImage(userID, generationID string, index int, ext string, data []byte) (string, error) {

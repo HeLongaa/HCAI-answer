@@ -495,6 +495,7 @@ type AIImageAgentConversationDeleteReq struct {
 type AIImageGenerateResp struct {
 	GenerationID string   `json:"generation_id"`
 	Size         string   `json:"size"`
+	Images       []string `json:"images"`
 	ImageURLs    []string `json:"image_urls"`
 	ExpiresAt    int64    `json:"expires_at"`
 }

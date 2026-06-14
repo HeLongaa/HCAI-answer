@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/apache/answer/internal/entity"
+	"github.com/apache/answer/internal/schema"
 	"github.com/apache/answer/internal/service/service_config"
 )
 
@@ -197,6 +199,75 @@ func TestSaveGeminiImageResponse(t *testing.T) {
 	}
 }
 
+func TestCallAndSaveImagesUsesSingleUpstreamRequestForOpenAIBatch(t *testing.T) {
+	dir := t.TempDir()
+	requestCount := 0
+	var receivedN float64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/images/generations" {
+			t.Fatalf("path = %s, want /images/generations", r.URL.Path)
+		}
+		requestCount++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if n, ok := body["n"].(float64); ok {
+			receivedN = n
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"` + base64.StdEncoding.EncodeToString([]byte("img-1")) + `"},{"b64_json":"` + base64.StdEncoding.EncodeToString([]byte("img-2")) + `"},{"b64_json":"` + base64.StdEncoding.EncodeToString([]byte("img-3")) + `"}]}`))
+	}))
+	defer server.Close()
+	service := &aiChatConfigService{
+		serviceConfig: &service_config.ServiceConfig{UploadPath: dir},
+	}
+	provider := &entity.AIImageProvider{
+		BaseURL:   server.URL,
+		APIKey:    "test-key",
+		APIFormat: "openai",
+	}
+	model := &entity.AIImageModel{
+		ProviderModelID: "gpt-image-1",
+		APIMode:         "images",
+	}
+
+	result, err := service.callAndSaveImages(context.Background(), provider, model, "img_batch", "user-1", &schema.AIImageGenerateReq{
+		Prompt:       "draw",
+		Size:         "1024x1024",
+		OutputFormat: "png",
+		Count:        3,
+	})
+	if err != nil {
+		t.Fatalf("callAndSaveImages err = %v", err)
+	}
+	if requestCount != 1 {
+		t.Fatalf("requestCount = %d, want 1", requestCount)
+	}
+	if receivedN != 3 {
+		t.Fatalf("received n = %v, want 3", receivedN)
+	}
+	if !result.SavePending {
+		t.Fatal("SavePending = false, want true")
+	}
+	if len(result.Images) != 3 {
+		t.Fatalf("len(result.Images) = %d, want 3", len(result.Images))
+	}
+	if len(result.ImageURLs) != 0 {
+		t.Fatalf("result.ImageURLs = %#v, want empty before async save", result.ImageURLs)
+	}
+}
+
+func TestShouldSplitImageBatchKeepsResponsesSequential(t *testing.T) {
+	provider := &entity.AIImageProvider{APIFormat: "openai"}
+	model := &entity.AIImageModel{APIMode: "responses"}
+	req := &schema.AIImageGenerateReq{Count: 3}
+
+	if !shouldSplitImageBatch(provider, model, req) {
+		t.Fatal("shouldSplitImageBatch = false, want true for responses mode")
+	}
+}
+
 func TestNormalizeProviderBaseURLRejectsUnsupportedSchemes(t *testing.T) {
 	tests := []string{
 		"file:///etc/passwd",
@@ -309,7 +380,7 @@ func TestProxyAndSaveImageStreamWritesHeartbeatDuringSilentUpstream(t *testing.T
 
 	_, err := service.proxyAndSaveImageStream(context.Background(), context.Background(), reader, &out, func() {
 		flushCount++
-	}, "user-a", "generation-a", "1024x1024")
+	}, "user-a", "generation-a", "1024x1024", 0)
 
 	if err == nil || !strings.Contains(err.Error(), "idle timeout") {
 		t.Fatalf("err = %v, want idle timeout", err)
@@ -327,7 +398,7 @@ func TestProxyAndSaveImageStreamFailsWithoutFinalImage(t *testing.T) {
 	var out bytes.Buffer
 	service := &aiChatConfigService{}
 
-	finalBody, err := service.proxyAndSaveImageStream(context.Background(), context.Background(), body, &out, func() {}, "user-a", "generation-a", "1024x1024")
+	finalBody, err := service.proxyAndSaveImageStream(context.Background(), context.Background(), body, &out, func() {}, "user-a", "generation-a", "1024x1024", 0)
 
 	if err == nil || !strings.Contains(err.Error(), "did not return final image data") {
 		t.Fatalf("err = %v, want missing final image error", err)
@@ -352,7 +423,7 @@ func TestProxyAndSaveImageStreamReturnsWhenFinalArrivesBeforeEOF(t *testing.T) {
 	}, 1)
 
 	go func() {
-		body, err := service.proxyAndSaveImageStream(context.Background(), context.Background(), reader, &out, func() {}, "user-a", "generation-a", "1024x1024")
+		body, err := service.proxyAndSaveImageStream(context.Background(), context.Background(), reader, &out, func() {}, "user-a", "generation-a", "1024x1024", 0)
 		resultCh <- struct {
 			body []byte
 			err  error
@@ -377,6 +448,24 @@ func TestProxyAndSaveImageStreamReturnsWhenFinalArrivesBeforeEOF(t *testing.T) {
 	}
 }
 
+func TestProxyAndSaveImageStreamOffsetsPartialImageIndex(t *testing.T) {
+	body := strings.NewReader(
+		`data: {"type":"response.image_generation_call.partial_image","partial_image_b64":"cGFydGlhbA==","partial_image_index":0}` + "\n\n" +
+			`data: {"type":"response.output_item.done","item":{"type":"image_generation_call","result":"ZmluYWw="},"output_index":0}` + "\n\n",
+	)
+	var out bytes.Buffer
+	service := &aiChatConfigService{}
+
+	_, err := service.proxyAndSaveImageStream(context.Background(), context.Background(), body, &out, func() {}, "user-a", "generation-a", "1024x1024", 2)
+
+	if err != nil {
+		t.Fatalf("proxyAndSaveImageStream returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"partial_image_index":2`) {
+		t.Fatalf("stream output = %q, want offset partial_image_index", out.String())
+	}
+}
+
 func TestProxyAndSaveImageStreamContinuesWhenDownstreamWriteBlocks(t *testing.T) {
 	oldDownstreamTimeout := imageStreamDownstreamTimeout
 	imageStreamDownstreamTimeout = 10 * time.Millisecond
@@ -392,7 +481,7 @@ func TestProxyAndSaveImageStreamContinuesWhenDownstreamWriteBlocks(t *testing.T)
 	t.Cleanup(writer.release)
 	service := &aiChatConfigService{}
 
-	finalBody, err := service.proxyAndSaveImageStream(context.Background(), context.Background(), body, writer, func() {}, "user-a", "generation-a", "1024x1024")
+	finalBody, err := service.proxyAndSaveImageStream(context.Background(), context.Background(), body, writer, func() {}, "user-a", "generation-a", "1024x1024", 0)
 
 	if err != nil {
 		t.Fatalf("proxyAndSaveImageStream returned error: %v", err)
