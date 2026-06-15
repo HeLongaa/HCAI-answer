@@ -187,6 +187,10 @@ func (fs *FileRecordService) DeleteAndMoveFileRecord(ctx context.Context, fileRe
 	oldFilePath := filepath.Join(fs.serviceConfig.UploadPath, fileRecord.FilePath)
 	deletedPath := filepath.Join(fs.serviceConfig.UploadPath, constant.DeletedSubPath, oldFilename)
 
+	if !dir.CheckFileExist(oldFilePath) {
+		log.Debugf("skip moving remote or missing file: %s", fileRecord.FileURL)
+		return nil
+	}
 	if err := writer.MoveFile(oldFilePath, deletedPath); err != nil {
 		return fmt.Errorf("move file error: %v", err)
 	}

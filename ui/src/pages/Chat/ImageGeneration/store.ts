@@ -4302,7 +4302,11 @@ async function deleteUnreferencedImageIds(imageIds: Iterable<string>) {
   }
 }
 
-async function persistTaskStreamPartialImage(taskId: string, dataUrl: string) {
+async function persistTaskStreamPartialImage(
+  taskId: string,
+  dataUrl: string,
+  requestIndex = 0,
+) {
   try {
     const imgId = await storeImage(dataUrl, 'generated');
     cacheImage(imgId, dataUrl);
@@ -4317,9 +4321,19 @@ async function persistTaskStreamPartialImage(taskId: string, dataUrl: string) {
 
     const currentIds = latestTask.streamPartialImageIds || [];
     if (currentIds.includes(imgId)) return;
+
+    const index = Math.max(0, Math.trunc(requestIndex));
+    const nextIds = [...currentIds];
+    const previousId = nextIds[index];
+    nextIds[index] = imgId;
+
     updateTaskInStore(taskId, {
-      streamPartialImageIds: [...currentIds, imgId],
+      streamPartialImageIds: nextIds,
     });
+
+    if (previousId && previousId !== imgId) {
+      await deleteUnreferencedImageIds([previousId]);
+    }
   } catch (err) {
     console.error(err);
   }
@@ -4469,9 +4483,14 @@ function getStreamString(source: Record<string, unknown>, key: string) {
   return typeof value === 'string' ? value : '';
 }
 
-function getStreamNumber(source: Record<string, unknown>, key: string) {
+function getStreamNumber(
+  source: Record<string, unknown>,
+  key: string,
+): number | undefined {
   const value = source[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function collectResponsesStreamImages(
@@ -4504,6 +4523,7 @@ async function generateAiImageStream(
   onPartialImage: (partial: {
     image: string;
     partialImageIndex?: number;
+    itemIndex?: number;
   }) => void,
   onGenerationCreated?: (generationId: string) => void,
 ): Promise<SystemImageStreamResult> {
@@ -4559,7 +4579,7 @@ async function generateAiImageStream(
       generationId = getStreamString(event, 'generation_id') || generationId;
       if (generationId) onGenerationCreated?.(generationId);
       responseSize = responseSize || getStreamString(event, 'size');
-      expiresAt = getStreamNumber(event, 'expires_at') || expiresAt;
+      expiresAt = getStreamNumber(event, 'expires_at') ?? expiresAt;
       return;
     }
     if (
@@ -4574,6 +4594,7 @@ async function generateAiImageStream(
         onPartialImage({
           image: normalizeBase64Image(b64, 'image/png'),
           partialImageIndex: getStreamNumber(event, 'partial_image_index'),
+          itemIndex: getStreamNumber(event, 'item_index'),
         });
       }
       return;
@@ -4608,7 +4629,7 @@ async function generateAiImageStream(
       });
       generationId = getStreamString(event, 'generation_id') || generationId;
       responseSize = getStreamString(event, 'size') || responseSize;
-      expiresAt = getStreamNumber(event, 'expires_at') || expiresAt;
+      expiresAt = getStreamNumber(event, 'expires_at') ?? expiresAt;
     }
   };
 
@@ -4685,9 +4706,7 @@ async function mapSystemImageGenerationToTask(
   generation: AiImageGeneration,
 ): Promise<TaskRecord> {
   const rawImageUrls = (generation.image_urls || []).filter(Boolean);
-  const streamPartialImageUrls = (generation.partial_image_urls || []).filter(
-    Boolean,
-  );
+  const streamPartialImageUrls = generation.partial_image_urls || [];
 
   const status = normalizeSystemGenerationStatus(generation.status);
   const createdAt = (generation.created_at || 0) * 1000 || Date.now();
@@ -4945,9 +4964,13 @@ async function executeSystemImageTask(taskId: string) {
               .setTaskStreamPreview(
                 taskId,
                 partial.image,
-                partial.partialImageIndex,
+                partial.itemIndex,
               );
-            void persistTaskStreamPartialImage(taskId, partial.image);
+            void persistTaskStreamPartialImage(
+              taskId,
+              partial.image,
+              partial.itemIndex,
+            );
           },
           (generationId) => {
             updateTaskInStore(taskId, { systemGenerationId: generationId });
@@ -6337,7 +6360,7 @@ async function executeAgentRound(
                   .getState()
                   .setTaskStreamPreview(taskId, image, partialImageIndex);
                 if (partialImageIndex === 0 || partialImageIndex == null) {
-                  void persistTaskStreamPartialImage(taskId, image);
+                  void persistTaskStreamPartialImage(taskId, image, 0);
                 }
               }
             : undefined,
@@ -6486,7 +6509,7 @@ async function executeAgentRound(
                 .getState()
                 .setTaskStreamPreview(taskId, image, partialImageIndex);
               if (partialImageIndex === 0 || partialImageIndex == null) {
-                void persistTaskStreamPartialImage(taskId, image);
+                void persistTaskStreamPartialImage(taskId, image, 0);
               }
             }
           : undefined,
@@ -6906,7 +6929,11 @@ async function executeTask(taskId: string) {
         useStore
           .getState()
           .setTaskStreamPreview(taskId, partial.image, partial.requestIndex);
-        void persistTaskStreamPartialImage(taskId, partial.image);
+        void persistTaskStreamPartialImage(
+          taskId,
+          partial.image,
+          partial.requestIndex,
+        );
       },
     });
 

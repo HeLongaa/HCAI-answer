@@ -25,6 +25,8 @@ import (
 	"os"
 	"time"
 
+	_ "github.com/apache/answer/internal/plugin/s3_storage"
+
 	"github.com/apache/answer/internal/base/conf"
 	"github.com/apache/answer/internal/base/constant"
 	"github.com/apache/answer/internal/base/cron"

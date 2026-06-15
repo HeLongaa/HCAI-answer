@@ -448,7 +448,7 @@ func TestProxyAndSaveImageStreamReturnsWhenFinalArrivesBeforeEOF(t *testing.T) {
 	}
 }
 
-func TestProxyAndSaveImageStreamOffsetsPartialImageIndex(t *testing.T) {
+func TestProxyAndSaveImageStreamAddsItemIndexWithoutChangingPartialImageStage(t *testing.T) {
 	body := strings.NewReader(
 		`data: {"type":"response.image_generation_call.partial_image","partial_image_b64":"cGFydGlhbA==","partial_image_index":0}` + "\n\n" +
 			`data: {"type":"response.output_item.done","item":{"type":"image_generation_call","result":"ZmluYWw="},"output_index":0}` + "\n\n",
@@ -461,8 +461,8 @@ func TestProxyAndSaveImageStreamOffsetsPartialImageIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("proxyAndSaveImageStream returned error: %v", err)
 	}
-	if !strings.Contains(out.String(), `"partial_image_index":2`) {
-		t.Fatalf("stream output = %q, want offset partial_image_index", out.String())
+	if !strings.Contains(out.String(), `"partial_image_index":0`) || !strings.Contains(out.String(), `"item_index":2`) {
+		t.Fatalf("stream output = %q, want partial_image_index stage and item_index slot", out.String())
 	}
 }
 

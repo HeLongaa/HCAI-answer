@@ -49,9 +49,11 @@ import (
 	"github.com/apache/answer/internal/entity"
 	ai_chat_config_repo "github.com/apache/answer/internal/repo/ai_chat_config"
 	"github.com/apache/answer/internal/schema"
+	"github.com/apache/answer/internal/service/media_storage"
 	"github.com/apache/answer/internal/service/service_config"
 	usercommon "github.com/apache/answer/internal/service/user_common"
 	"github.com/apache/answer/pkg/uid"
+	"github.com/apache/answer/plugin"
 	"github.com/go-resty/resty/v2"
 	"github.com/segmentfault/pacman/errors"
 	"github.com/segmentfault/pacman/log"
@@ -1775,7 +1777,6 @@ func (s *aiChatConfigService) proxyAndSaveImageStream(
 	var finalBody []byte
 	var lastPartialImage string
 	var lastPartialAt time.Time
-	partialImageURLs := make([]string, 0, 3)
 	rawLogCount := 0
 	finalReady := false
 	lastUpstreamAt := time.Now()
@@ -1845,28 +1846,7 @@ func (s *aiChatConfigService) proxyAndSaveImageStream(
 		if result.PartialImageB64 != "" {
 			lastPartialImage = result.PartialImageB64
 			lastPartialAt = time.Now()
-			if itemIndex > 0 {
-				result.PartialImageIndex = itemIndex
-				result.Event["partial_image_index"] = itemIndex
-			}
-			if imageURL, err := s.saveImageStreamPartial(userID, generationID, result.PartialImageIndex, result.PartialImageB64); err != nil {
-				log.Errorf("ai image stream partial save failed generation_id=%s user_id=%s index=%d error=%v", generationID, userID, result.PartialImageIndex, err)
-			} else if imageURL != "" {
-				partialIndex := result.PartialImageIndex
-				if partialIndex < 0 {
-					partialIndex = len(partialImageURLs)
-				}
-				for len(partialImageURLs) <= partialIndex {
-					partialImageURLs = append(partialImageURLs, "")
-				}
-				partialImageURLs[partialIndex] = imageURL
-				rawPartialURLs, _ := json.Marshal(filterNonEmptyStrings(partialImageURLs))
-				if err := s.repo.UpdateImageGeneration(ctx, generationID, &entity.AIImageGeneration{
-					PartialImageURLs: string(rawPartialURLs),
-				}, "partial_image_urls"); err != nil {
-					log.Errorf("ai image stream partial record update failed generation_id=%s user_id=%s error=%v", generationID, userID, err)
-				}
-			}
+			result.Event["item_index"] = itemIndex
 		}
 		if len(result.FinalBody) > 0 && (len(finalBody) == 0 || responseBodyHasImageData(result.FinalBody)) {
 			finalBody = result.FinalBody
@@ -4046,32 +4026,25 @@ func (s *aiChatConfigService) saveImageAPIResponse(ctx context.Context, userID, 
 }
 
 func (s *aiChatConfigService) saveGeneratedImage(userID, generationID string, index int, ext string, data []byte) (string, error) {
-	if s.serviceConfig == nil || strings.TrimSpace(s.serviceConfig.UploadPath) == "" {
-		return "", fmt.Errorf("upload path is not configured")
-	}
 	if ext == "" || len(ext) > 8 {
 		ext = ".png"
+	}
+	filename := fmt.Sprintf("%s-%d%s", generationID, index+1, ext)
+	if useS3Storage() {
+		objectKey := path.Join(constant.AIImageSubPath, userID, filename)
+		return media_storage.UploadBytes(context.Background(), objectKey, data)
+	}
+	if s.serviceConfig == nil || strings.TrimSpace(s.serviceConfig.UploadPath) == "" {
+		return "", fmt.Errorf("upload path is not configured")
 	}
 	dir := filepath.Join(s.serviceConfig.UploadPath, constant.AIImageSubPath, userID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
-	filename := fmt.Sprintf("%s-%d%s", generationID, index+1, ext)
 	if err := os.WriteFile(filepath.Join(dir, filename), data, 0644); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("/uploads/%s/%s/%s", constant.AIImageSubPath, userID, filename), nil
-}
-
-func (s *aiChatConfigService) saveImageStreamPartial(userID, generationID string, index int, imageB64 string) (string, error) {
-	data, ext, err := decodeImageData(imageB64)
-	if err != nil {
-		return "", err
-	}
-	if index < 0 {
-		index = 0
-	}
-	return s.saveGeneratedImage(userID, generationID+"-partial", index, ext, data)
 }
 
 func (s *aiChatConfigService) runVideoGeneration(ctx context.Context, provider *entity.AIVideoProvider, model *entity.AIVideoModel, generationID, userID string, req *schema.AIVideoGenerateReq) {
@@ -4273,6 +4246,11 @@ func (s *aiChatConfigService) downloadUpstreamVideo(ctx context.Context, provide
 }
 
 func (s *aiChatConfigService) saveGeneratedVideo(userID, generationID string, data []byte) (string, error) {
+	filename := fmt.Sprintf("%s.mp4", generationID)
+	if useS3Storage() {
+		objectKey := path.Join(constant.AIVideoSubPath, userID, filename)
+		return media_storage.UploadBytes(context.Background(), objectKey, data)
+	}
 	if s.serviceConfig == nil || strings.TrimSpace(s.serviceConfig.UploadPath) == "" {
 		return "", fmt.Errorf("upload path is not configured")
 	}
@@ -4281,7 +4259,6 @@ func (s *aiChatConfigService) saveGeneratedVideo(userID, generationID string, da
 		log.Errorf("ai video save mkdir failed generation_id=%s user_id=%s dir=%s error=%v", generationID, userID, dir, err)
 		return "", err
 	}
-	filename := fmt.Sprintf("%s.mp4", generationID)
 	filePath := filepath.Join(dir, filename)
 	if err := os.WriteFile(filePath, data, 0644); err != nil {
 		log.Errorf("ai video save write failed generation_id=%s user_id=%s path=%s bytes=%d error=%v", generationID, userID, filePath, len(data), err)
@@ -4292,6 +4269,32 @@ func (s *aiChatConfigService) saveGeneratedVideo(userID, generationID string, da
 }
 
 func (s *aiChatConfigService) loadUserGeneratedImage(userID, imageURL string) (*preparedReferenceImage, error) {
+	if useS3Storage() {
+		if objectKey, ok := media_storage.ObjectKeyFromPublicURL(strings.TrimSpace(imageURL)); ok {
+			prefix := path.Join(constant.AIImageSubPath, userID) + "/"
+			if !strings.HasPrefix(path.Clean(objectKey), prefix) {
+				return nil, fmt.Errorf("image is outside current user upload path")
+			}
+			data, ext, err := downloadImage(context.Background(), imageURL, imageDownloadOptions{
+				MaxBytes:       defaultImageDownloadMaxBytes,
+				RequireHTTPS:   true,
+				BlockPrivateIP: true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			mimeType := mime.TypeByExtension(ext)
+			if mimeType == "" {
+				mimeType = "image/png"
+			}
+			return &preparedReferenceImage{
+				Data:    data,
+				MIME:    mimeType,
+				Ext:     ext,
+				DataURL: fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data)),
+			}, nil
+		}
+	}
 	if s.serviceConfig == nil || strings.TrimSpace(s.serviceConfig.UploadPath) == "" {
 		return nil, fmt.Errorf("upload path is not configured")
 	}
@@ -4333,6 +4336,10 @@ func (s *aiChatConfigService) loadUserGeneratedImage(userID, imageURL string) (*
 		Ext:     ext,
 		DataURL: fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data)),
 	}, nil
+}
+
+func useS3Storage() bool {
+	return plugin.StatusManager.IsEnabled(media_storage.S3PluginSlugName) && media_storage.IsS3Configured()
 }
 
 func (s *aiChatConfigService) listSubscriptionModelRates(ctx context.Context) []*schema.AISubscriptionModelRate {

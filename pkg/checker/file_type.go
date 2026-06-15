@@ -65,6 +65,40 @@ func DecodeAndCheckImageFile(localFilePath string, maxImageMegapixel int) bool {
 	return true
 }
 
+func DecodeAndCheckImageReader(file io.ReadSeeker, ext string, maxImageMegapixel int) bool {
+	ext = strings.ToLower(strings.TrimPrefix(ext, "."))
+	switch ext {
+	case "jpg", "jpeg", "png", "gif":
+		if !decodeAndCheckImageReader(file, ext, maxImageMegapixel, formatSpecificConfigCheck) {
+			return false
+		}
+		if !decodeAndCheckImageReader(file, ext, maxImageMegapixel, formatSpecificImageCheck) {
+			return false
+		}
+	case "webp":
+		if !decodeAndCheckImageReader(file, ext, maxImageMegapixel, webpImageConfigCheck) {
+			return false
+		}
+		if !decodeAndCheckImageReader(file, ext, maxImageMegapixel, webpImageCheck) {
+			return false
+		}
+	}
+	return true
+}
+
+func decodeAndCheckImageReader(file io.ReadSeeker, ext string, maxImageMegapixel int,
+	checker func(file io.Reader, ext string, maxImageMegapixel int) error) bool {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		log.Errorf("seek file error: %v", err)
+		return false
+	}
+	if err := checker(file, ext, maxImageMegapixel); err != nil {
+		log.Errorf("check image format error: %v", err)
+		return false
+	}
+	return true
+}
+
 func decodeAndCheckImageFile(localFilePath string, maxImageMegapixel int, ext string,
 	checker func(file io.Reader, ext string, maxImageMegapixel int) error) bool {
 	file, err := os.Open(localFilePath)
